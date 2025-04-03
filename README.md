@@ -2,7 +2,7 @@
 Agregado el archivo principal del buscador de Excel a DataFrame con Tkinter.
 
 
-# Buscador Avanzado en Excel con Interfaz Gráfica
+# Buscador en Excel con Interfaz Gráfica
 
 Este proyecto consiste en una aplicación de escritorio desarrollada en Python utilizando la biblioteca Tkinter. Permite a los usuarios cargar archivos Excel, realizar búsquedas avanzadas dentro de sus datos y comparar dos archivos Excel.
 
