@@ -53,13 +53,35 @@ class MotorBusqueda:
         if not termino:
             return self.datos_buscador.copy()
 
-        # Lógica mejorada de búsqueda priorizando datos_comparar
-        if self.datos_comparar is not None:
-            resultados = self._buscar_en_dataframe(self.datos_comparar, termino)
-            if not resultados.empty:
-                return resultados
-            
-        return self._buscar_en_dataframe(self.datos_buscador, termino)
+        # Primero buscar en datos_buscador
+        resultados_buscador = self._buscar_en_dataframe(self.datos_buscador, termino)
+
+        # Si no hay resultados o no hay datos para comparar, devolver los resultados del buscador
+        if resultados_buscador.empty or self.datos_comparar is None:
+            return resultados_buscador
+
+        # Buscar coincidencias entre los resultados del buscador y datos_comparar
+        # Convertir cada fila a texto para buscar coincidencias de palabras
+        resultados_finales = []
+
+        for _, fila_buscador in resultados_buscador.iterrows():
+            texto_fila = ' '.join(fila_buscador.astype(str)).upper()
+
+            # Buscar coincidencias en datos_comparar
+            for _, fila_comparar in self.datos_comparar.iterrows():
+                texto_comparar = ' '.join(fila_comparar.astype(str)).upper()
+
+                # Si hay alguna palabra en común
+                palabras_fila = set(texto_fila.split())
+                palabras_comparar = set(texto_comparar.split())
+
+                if palabras_fila.intersection(palabras_comparar):
+                    resultados_finales.append(fila_comparar)
+
+        if resultados_finales:
+            return pd.DataFrame(resultados_finales)
+        else:
+            return pd.DataFrame()
 
     def _buscar_en_dataframe(self, df: pd.DataFrame, termino: str) -> pd.DataFrame:
         """Lógica de búsqueda optimizada"""
@@ -110,19 +132,19 @@ class InterfazGrafica(tk.Tk):
         # Botones de control
         self.btn_cargar = ttk.Button(
             self.marco_controles,
-            text="Cargar Excel Buscador",
+            text="Cargar Diccionario",
             command=self._cargar_buscador
         )
 
         self.btn_comparar = ttk.Button(
             self.marco_controles,
-            text="Cargar Excel a Comparar",
+            text="Cargar Descripciones",
             command=self._cargar_excel_a_comparar,
             state="disabled"
         )
 
         # Entrada de búsqueda
-        self.lbl_busqueda = ttk.Label(self.marco_controles, text="Término/s de búsqueda:")
+        self.lbl_busqueda = ttk.Label(self.marco_controles, text="REGLAS a ensayar:")
         self.entrada_busqueda = ttk.Entry(self.marco_controles, width=50)
         self.btn_buscar = ttk.Button(
             self.marco_controles,
@@ -134,13 +156,13 @@ class InterfazGrafica(tk.Tk):
         # Botón de exportación
         self.btn_exportar = ttk.Button(
             self.marco_controles,
-            text="Exportar Resultados",
+            text="Exportar REGLAS",
             command=self._exportar_resultados,
             state="disabled"
         )
 
         # Etiquetas para las tablas
-        self.lbl_datos = ttk.Label(self, text="Datos cargados (Buscador):")
+        self.lbl_datos = ttk.Label(self, text="Datos cargados (Diccionario):")
         self.lbl_resultados = ttk.Label(self, text="Resultados de búsqueda:")
 
         # Tablas con scrollbars
@@ -242,13 +264,13 @@ class InterfazGrafica(tk.Tk):
                 valores = [str(v) for v in fila.values]
                 tabla.insert("", "end", values=valores)
             self.barra_estado.config(text=f"Mostrando {len(datos)} filas")
-
+         
     def _cargar_buscador(self):
         ruta = filedialog.askopenfilename(filetypes=[("Archivos Excel", "*.xlsx *.xls")])
         if not ruta:
             return
 
-        self.barra_estado.config(text="Cargando archivo del buscador...")
+        self.barra_estado.config(text="Cargando diccionario...")
         self.update_idletasks()
 
         if self.motor.cargar_excel_buscador(ruta):
@@ -258,40 +280,44 @@ class InterfazGrafica(tk.Tk):
             self.btn_buscar["state"] = "normal"
             messagebox.showinfo("Éxito", f"Archivo cargado correctamente\nFilas: {len(self.motor.datos_buscador)}")
         else:
-            self.barra_estado.config(text="Error al cargar archivo del buscador")
+            self.barra_estado.config(text="Error al cargar diccionario")
 
     def _cargar_excel_a_comparar(self):
         if self.motor.datos_buscador is None:
-            messagebox.showwarning("Advertencia", "Primero cargue un archivo con 'Cargar Excel Buscador'")
+            messagebox.showwarning("Advertencia", "Primero cargue un archivo con 'Cargar Diccionario'")
             return
 
-        ruta = filedialog.askopenfilename(
-            title="Seleccionar archivo Excel a comparar",
+        self.ruta_descripciones = filedialog.askopenfilename(
+            title="Seleccionar archivo de descripciones",
             filetypes=[("Archivos Excel", "*.xlsx *.xls")]
         )
 
-        if not ruta:
+        if not self.ruta_descripciones:
             return
 
-        self.barra_estado.config(text="Cargando archivo a comparar...")
+        self.barra_estado.config(text="Cargando descripciones...")
         self.update_idletasks()
 
-        if self.motor.cargar_excel_comparar(ruta):
-            df_comparar = self.motor.datos_comparar
-            if df_comparar is not None:
-                if self.motor.datos_buscador.equals(df_comparar):
+        if self.motor.cargar_excel_comparar(self.ruta_descripciones):
+            self.df_comparar = self.motor.datos_comparar
+            if self.df_comparar is not None:
+                if self.motor.datos_buscador.equals(self.df_comparar):
                     messagebox.showinfo("Comparación", "Los archivos son idénticos.")
                 else:
                     messagebox.showinfo("Comparación", "Los archivos son diferentes.")
-                self._actualizar_tabla(self.tabla_resultados, df_comparar)
-                self.barra_estado.config(text="Archivo a comparar cargado en Resultados de búsqueda")
+                self._actualizar_tabla(self.tabla_resultados, self.df_comparar)
+                self.barra_estado.config(text="Descripciones cargadas en Resultados de búsqueda")
         else:
-            self.barra_estado.config(text="Error al cargar archivo a comparar")
+            self.barra_estado.config(text="Error al cargar descripciones")
 
     def _ejecutar_busqueda(self):
         termino = self.entrada_busqueda.get()
         self.barra_estado.config(text="Buscando...")
         self.update_idletasks()
+        
+        if not termino.strip():
+            messagebox.showwarning("Advertencia", "Debe ingresar un término de búsqueda válido.")
+            self._actualizar_tabla(self.tabla_resultados, self.motor.cargar_excel_comparar(self.ruta_descripciones))
 
         resultados = self.motor.buscar(termino)
 
@@ -302,11 +328,12 @@ class InterfazGrafica(tk.Tk):
         else:
             self.tabla_resultados.delete(*self.tabla_resultados.get_children())
             self.btn_exportar["state"] = "disabled"
-            messagebox.showinfo("Información", "No se encontraron resultados.")
             self.barra_estado.config(text="No se encontraron resultados")
-
+        return resultados
+    
     def _exportar_resultados(self):
-        if self.motor.resultados is None or self.motor.resultados.empty:
+        resultados = self._ejecutar_busqueda()
+        if resultados is None or resultados.empty:
             messagebox.showwarning("Advertencia", "No hay resultados para exportar")
             return
 
@@ -319,23 +346,36 @@ class InterfazGrafica(tk.Tk):
         if not ruta:
             return
 
-        self.barra_estado.config(text="Exportando resultados...")
+        self.barra_estado.config(text="Exportando REGLAS...")
         self.update_idletasks()
 
         try:
             extension = ruta.split('.')[-1].lower()
+
+            # Añadir información de depuración
+            print(f"DataFrame info:")
+            print(resultados.info())
+            print(f"DataFrame shape: {resultados.shape}")
+            print(f"DataFrame dtypes: {resultados.dtypes}")
+            print(f"Primeras 5 filas: {resultados.head()}")
+
             if extension == 'csv':
-                self.motor.resultados.to_csv(ruta, index=False)
+                resultados.to_csv(ruta, index=False)
             elif extension in ['xls', 'xlsx']:
-                writer = pd.ExcelWriter(ruta, engine='xlsxwriter')
-                self.motor.resultados.to_excel(writer, index=False)
-                writer.close()
+                with pd.ExcelWriter(ruta, engine='xlsxwriter') as writer:
+                    resultados.to_excel(writer, index=False)
+                    # Asegurarse de que se guarde
+                    print("Excel creado correctamente")
 
             messagebox.showinfo("Éxito", f"Archivo exportado correctamente a:\n{ruta}")
-            self.barra_estado.config(text=f"Resultados exportados a {ruta}")
+            self.barra_estado.config(text=f"REGLAS exportadas a {ruta}")
         except Exception as e:
-            messagebox.showerror("Error", f"Error al exportar:\n{e}")
-            self.barra_estado.config(text="Error al exportar resultados")
+            # Mostrar información más detallada del error
+            import traceback
+            error_detallado = traceback.format_exc()
+            print(f"Error detallado: {error_detallado}")
+            messagebox.showerror("Error", f"Error al exportar:\n{e}\n\nDetalles: {error_detallado}")
+            self.barra_estado.config(text="Error al exportar REGLAS")
 
 if __name__ == "__main__":
     app = InterfazGrafica()
