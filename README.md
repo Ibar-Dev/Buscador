@@ -1,62 +1,53 @@
-# Buscador Avanzado Optimizado de Archivos Excel
+# Buscador Avanzado Optimizado
 
-Este proyecto es una aplicación de escritorio desarrollada en Python utilizando la biblioteca Tkinter para la interfaz gráfica y pandas para el manejo de archivos Excel. Permite a los usuarios cargar archivos Excel, realizar búsquedas avanzadas dentro de ellos y comparar el contenido de dos archivos.
+## Descripción
+Buscador Avanzado Optimizado es una aplicación de escritorio desarrollada en Python que permite cargar, buscar y comparar datos entre archivos Excel. Está diseñada para facilitar la búsqueda de términos específicos en grandes conjuntos de datos y exportar los resultados.
 
-## Características Principales
+## Características
+- Carga de archivos Excel como diccionario principal y archivo de descripciones para comparar
+- Búsqueda avanzada con operadores '+' (AND) y '-' (OR)
+- Visualización de datos en tablas con desplazamiento horizontal y vertical
+- Exportación de resultados en formatos Excel (.xlsx, .xls) y CSV
+- Interfaz gráfica intuitiva con barras de estado informativas
 
-* **Carga de Archivos Excel:** Permite cargar dos archivos Excel: uno para realizar la búsqueda y otro opcional para comparar y priorizar resultados.
-* **Búsqueda Avanzada:**
-    * Búsqueda simple de un término en todas las columnas del archivo cargado.
-    * Búsqueda con operador **AND** utilizando el símbolo `+` (ejemplo: `palabra1+palabra2`). Encontrará filas que contengan todas las palabras especificadas.
-    * Búsqueda con operador **OR** utilizando el símbolo `-` (ejemplo: `palabra1-palabra2`). Encontrará filas que contengan al menos una de las palabras especificadas.
-    * La búsqueda no distingue entre mayúsculas y minúsculas.
-* **Comparación de Archivos:** Permite cargar un segundo archivo Excel para comparar su contenido con el primero. Se muestra un mensaje indicando si los archivos son idénticos o diferentes. La búsqueda priorizará los resultados encontrados en el archivo de comparación (si está cargado).
-* **Visualización de Datos:** Muestra los datos cargados y los resultados de la búsqueda en tablas interactivas dentro de la aplicación.
-* **Exportación de Resultados:** Permite exportar los resultados de la búsqueda a archivos Excel (`.xlsx`, `.xls`) o CSV (`.csv`).
-* **Interfaz Gráfica Intuitiva:** Interfaz de usuario fácil de usar para una experiencia fluida.
-* **Barra de Estado:** Proporciona información sobre el estado de la aplicación y las operaciones en curso.
+## Requisitos
+- Python 3.6 o superior
+- Bibliotecas:
+  - tkinter
+  - pandas
+  - xlsxwriter
 
-## Cómo Utilizar
+## Instalación
+1. Asegúrese de tener Python instalado en su sistema
+2. Instale las dependencias necesarias:
+```
+pip install pandas xlsxwriter
+```
+3. Ejecute la aplicación:
+```
+python buscador_avanzado.py
+```
 
-### Requisitos
+## Uso
+1. **Cargar Diccionario**: Cargue el archivo Excel principal que servirá como base de datos para las búsquedas.
+2. **Cargar Descripciones**: (Opcional) Cargue un segundo archivo Excel para comparar con el diccionario.
+3. **Buscar**: Introduzca términos de búsqueda en el campo "REGLAS a ensayar".
+   - Use '+' entre palabras para buscar coincidencias que contengan TODAS las palabras (operador AND)
+   - Use '-' entre palabras para buscar coincidencias que contengan ALGUNA de las palabras (operador OR)
+4. **Exportar REGLAS**: Exporte los resultados de la búsqueda a un archivo Excel o CSV.
 
-* **Python 3.x** instalado en su sistema.
-* Las siguientes bibliotecas de Python deben estar instaladas:
-    * **tkinter:** Generalmente viene preinstalado con Python.
-    * **pandas:** Para el manejo de archivos Excel. Puede instalarlo con: `pip install pandas`
-    * **openpyxl:** Necesario para leer y escribir archivos Excel `.xlsx`. Puede instalarlo con: `pip install openpyxl`
-    * **xlsxwriter:** (Opcional, pero recomendado para una mejor compatibilidad al exportar a Excel). Puede instalarlo con: `pip install xlsxwriter`
+## Sintaxis de búsqueda
+- **Búsqueda simple**: Escriba una palabra o frase para encontrar coincidencias exactas.
+- **Búsqueda AND**: Use '+' entre términos (ej. "término1+término2") para encontrar filas que contengan ambos términos.
+- **Búsqueda OR**: Use '-' entre términos (ej. "término1-término2") para encontrar filas que contengan al menos uno de los términos.
 
-### Ejecución
+## Estructura del código
+- **ManejadorExcel**: Clase para operaciones con archivos Excel.
+- **MotorBusqueda**: Gestiona la lógica de búsqueda y manipulación de datos.
+- **InterfazGrafica**: Maneja la interfaz gráfica de la aplicación.
 
-1.  Guarde el código Python proporcionado en un archivo con extensión `.py` (por ejemplo, `buscador_excel.py`).
-2.  Abra una terminal o símbolo del sistema.
-3.  Navegue hasta el directorio donde guardó el archivo.
-4.  Ejecute la aplicación con el comando: `python buscador_excel.py`
+## Licencia
+Este proyecto está disponible como software de código abierto.
 
-### Pasos
-
-1.  **Cargar Archivo Buscador:** Haga clic en el botón "Cargar Excel Buscador" y seleccione el archivo Excel en el que desea realizar la búsqueda. Los datos del archivo se mostrarán en la tabla superior.
-2.  **Cargar Archivo a Comparar (Opcional):** Si desea comparar un segundo archivo o priorizar resultados de otro archivo, haga clic en "Cargar Excel a Comparar" y seleccione el archivo. Se mostrará un mensaje indicando si los archivos son idénticos o diferentes, y los datos del segundo archivo se mostrarán en la tabla inferior (inicialmente).
-3.  **Introducir Término de Búsqueda:** Escriba el término o términos que desea buscar en el campo de texto "Término/s de búsqueda:".
-    * Para búsqueda simple, escriba una sola palabra o frase.
-    * Para búsqueda con **AND**, separe las palabras con el símbolo `+` (ej: `nombre+apellido`).
-    * Para búsqueda con **OR**, separe las palabras con el símbolo `-` (ej: `producto-servicio`).
-4.  **Buscar:** Haga clic en el botón "Buscar" o presione la tecla Enter. Los resultados de la búsqueda se mostrarán en la tabla inferior.
-5.  **Exportar Resultados (Opcional):** Si desea guardar los resultados de la búsqueda, haga clic en el botón "Exportar Resultados". Se le pedirá que elija un nombre de archivo y el formato (Excel o CSV).
-
-## Estructura del Código
-
-El código se organiza en las siguientes clases:
-
-* **`ManejadorExcel`:** Contiene métodos estáticos para cargar archivos Excel de forma segura utilizando pandas.
-* **`MotorBusqueda`:** Gestiona la lógica de búsqueda y almacenamiento de los datos cargados. Implementa la funcionalidad de búsqueda con los operadores AND (`+`) y OR (`-`).
-* **`InterfazGrafica`:** Crea la ventana principal de la aplicación y define todos los widgets (botones, etiquetas, tablas, etc.) y su comportamiento.
-
-## Notas Adicionales
-
-* La aplicación muestra un máximo de 3 resultados iniciales en la tabla de resultados para mejorar el rendimiento con grandes conjuntos de datos. La barra de estado indicará el número total de coincidencias encontradas.
-* Se utilizan mensajes de error y advertencia para proporcionar retroalimentación al usuario en caso de problemas al cargar archivos o durante la búsqueda.
-* La interfaz gráfica está diseñada para ser responsive dentro de los límites definidos.
-
-Este proyecto proporciona una herramienta útil para buscar y comparar información dentro de archivos Excel de manera eficiente.
+## Contacto
+Para soporte o sugerencias, por favor contacte al desarrollador.
