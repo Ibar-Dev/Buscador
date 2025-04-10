@@ -55,15 +55,7 @@ class MotorBusqueda:
         if not termino:
             return self.datos_diccionario.copy()
         elif termino not in self.copia_diccionario:
-            # messagebox.showwarning("Aviso", "Es termino no se encuentra en el diccionario")
-            # return self.datos_diccionario.copy()
-        
-        # Buscar en datos_diccionario
-        
-        # existe = self._añadir_a_busqueda(self.copia_diccionario, termino)
 
-        # if existe:
-            # Si hay resultados en datos_diccionario, buscar en datos_descripcion
             if self.datos_descripcion is not None:
                 self.copia_descripcion = self.datos_descripcion.copy()
                 resultados_descripcion = self._añadir_a_busqueda(self.copia_descripcion, termino)
@@ -78,23 +70,29 @@ class MotorBusqueda:
             
             if '+' in termino:
                 palabras = [p.strip() for p in termino.split('+') if p]
-                mascara = df.astype(str).apply(lambda col: col.str.upper().str.contains(palabras[0].upper()), axis=0).any(axis=1)
-                # Iterar sobre las palabras restantes y combinar las máscaras
+                mascara = df.astype(str).apply(lambda col: col.str.upper().str.contains(rf"\b{palabras[0]}\b", regex=True), axis=0).any(axis=1)
                 for palabra in palabras[1:]:
-                    # Combinar con "Y" (AND) si quieres que todas las palabras estén presentes en la misma fila
-                    mascara &= df.astype(str).apply(lambda col: col.str.upper().str.contains(palabra.upper()), axis=0).any(axis=1)
+                    palabra_regex = rf"\b{palabra}\b"
+                    mascara &= df.astype(str).apply(lambda col: col.str.upper().str.contains(palabra_regex, regex=True), axis=0).any(axis=1)
                    
             elif '-' in termino:
                 palabras = [p.strip() for p in termino.split('-') if p]
                 mascara = df.apply(lambda fila: any(p in ' '.join(fila.astype(str)).upper() for p in palabras), axis=1)
+                for palabra1 in palabras[1:]:
+                    palabra_regex1 = rf"\b{palabra1}\b"
+                    mascara &= df.astype(str).apply(lambda col: col.str.upper().str.contains(palabra_regex1, regex=True), axis=0).any(axis=1)
 
-            elif ' ' in termino: 
-                mascara = df.apply(lambda fila: termino in ' '.join(fila.astype(str)).upper(), axis=1)
+            elif ' ' in termino:
+                termino_regex2 = rf"\b{termino}\b" 
+                mascara = df.apply(lambda fila: termino_regex2 in ' '.join(fila.astype(str)).upper(), axis=1)
             
+            elif termino:
+                termino_regex3 = rf"\b{termino}\b"
+                mascara = df.astype(str).apply(lambda col: col.str.upper().str.contains(termino_regex3, regex=True), axis=0).any(axis=1)
+
             else:
                 mascara = df.astype(str).apply(lambda col: col.str.upper().str.contains(termino), axis=0).any(axis=1)
 
-                # Filtrar el DataFrame usando la máscara
             resultados = df[mascara].copy()
             return resultados 
 
