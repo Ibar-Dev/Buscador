@@ -37,12 +37,12 @@ class MotorBusqueda:
         self.copia_diccionario: Optional[pd.DataFrame] = None
         self.copia_descripcion: Optional[pd.DataFrame] = None
         
-    def cargar_excel_buscador(self, ruta: str) -> bool:
+    def cargar_excel_diccionario(self, ruta: str) -> bool:
         self.datos_diccionario = ManejadorExcel.cargar_excel(ruta)
         self.archivo_actual = ruta if self.datos_diccionario is not None else None
         return self.datos_diccionario is not None
 
-    def cargar_excel_comparar(self, ruta: str) -> bool:
+    def cargar_excel_descripcion(self, ruta: str) -> bool:
         self.datos_descripcion = ManejadorExcel.cargar_excel(ruta)
         return self.datos_descripcion is not None
 
@@ -54,40 +54,50 @@ class MotorBusqueda:
         termino = termino.strip().upper()
         if not termino:
             return self.datos_diccionario.copy()
-
+        elif termino not in self.copia_diccionario:
+            # messagebox.showwarning("Aviso", "Es termino no se encuentra en el diccionario")
+            # return self.datos_diccionario.copy()
+        
         # Buscar en datos_diccionario
-        resultados_buscador = self._añadir_a_busqueda(self.copia_diccionario, termino)
+        
+        # existe = self._añadir_a_busqueda(self.copia_diccionario, termino)
 
-        # Si no hay resultados en datos_diccionario, buscar en datos_descripcion
-        if resultados_buscador.empty and self.datos_descripcion is not None:
-            self.copia_descripcion = self.datos_descripcion.copy()
-            resultados_descripcion = self._añadir_a_busqueda(self.copia_descripcion, termino)
-            return resultados_descripcion
-
-        return resultados_buscador
+        # if existe:
+            # Si hay resultados en datos_diccionario, buscar en datos_descripcion
+            if self.datos_descripcion is not None:
+                self.copia_descripcion = self.datos_descripcion.copy()
+                resultados_descripcion = self._añadir_a_busqueda(self.copia_descripcion, termino)
+                return resultados_descripcion
+            else:
+                messagebox.showwarning("Aviso", "Combinación no encontrada")
+        
 
     def _añadir_a_busqueda(self, df: pd.DataFrame, termino: str) -> pd.DataFrame:
         """Lógica de búsqueda optimizada"""
         try:
+            
             if '+' in termino:
                 palabras = [p.strip() for p in termino.split('+') if p]
-                mascara = df.apply(
-                    lambda fila: all(p in ' '.join(fila.astype(str)).upper() for p in palabras),
-                    axis=1
-                )
+                mascara = df.astype(str).apply(lambda col: col.str.upper().str.contains(palabras[0].upper()), axis=0).any(axis=1)
+                # Iterar sobre las palabras restantes y combinar las máscaras
+                for palabra in palabras[1:]:
+                    # Combinar con "Y" (AND) si quieres que todas las palabras estén presentes en la misma fila
+                    mascara &= df.astype(str).apply(lambda col: col.str.upper().str.contains(palabra.upper()), axis=0).any(axis=1)
+                   
             elif '-' in termino:
                 palabras = [p.strip() for p in termino.split('-') if p]
-                mascara = df.apply(
-                    lambda fila: any(p in ' '.join(fila.astype(str)).upper() for p in palabras),
-                    axis=1
-                )
-            else:
-                mascara = df.apply(
-                    lambda fila: termino in ' '.join(fila.astype(str)).upper(),
-                    axis=1
-                )
+                mascara = df.apply(lambda fila: any(p in ' '.join(fila.astype(str)).upper() for p in palabras), axis=1)
 
-            return df[mascara].copy()
+            elif ' ' in termino: 
+                mascara = df.apply(lambda fila: termino in ' '.join(fila.astype(str)).upper(), axis=1)
+            
+            else:
+                mascara = df.astype(str).apply(lambda col: col.str.upper().str.contains(termino), axis=0).any(axis=1)
+
+                # Filtrar el DataFrame usando la máscara
+            resultados = df[mascara].copy()
+            return resultados 
+
         except Exception as e:
             messagebox.showerror("Error", f"Error en búsqueda: {e}")
             return pd.DataFrame()
@@ -256,7 +266,7 @@ class InterfazGrafica(tk.Tk):
         self.barra_estado.config(text="Cargando diccionario...")
         self.update_idletasks()
 
-        if self.motor.cargar_excel_buscador(ruta):
+        if self.motor.cargar_excel_diccionario(ruta):
             self._actualizar_tabla(self.tabla_principal, self.motor.datos_diccionario)
             self.title(f"Buscador - {ruta}")
             self.btn_comparar["state"] = "normal"
@@ -281,14 +291,14 @@ class InterfazGrafica(tk.Tk):
         self.barra_estado.config(text="Cargando descripciones...")
         self.update_idletasks()
 
-        if self.motor.cargar_excel_comparar(self.ruta_descripciones):
-            self.df_comparar = self.motor.datos_descripcion
-            if self.df_comparar is not None:
-                if self.motor.datos_diccionario.equals(self.df_comparar):
+        if self.motor.cargar_excel_descripcion(self.ruta_descripciones):
+            self.df_descripcion = self.motor.datos_descripcion
+            if self.df_descripcion is not None:
+                if self.motor.datos_diccionario.equals(self.df_descripcion):
                     messagebox.showinfo("Comparación", "Los archivos son idénticos.")
                 else:
                     messagebox.showinfo("Comparación", "Los archivos son diferentes.")
-                self._actualizar_tabla(self.tabla_resultados, self.df_comparar)
+                self._actualizar_tabla(self.tabla_resultados, self.df_descripcion)
                 self.barra_estado.config(text="Descripciones cargadas en Resultados de búsqueda")
         else:
             self.barra_estado.config(text="Error al cargar descripciones")
@@ -300,7 +310,6 @@ class InterfazGrafica(tk.Tk):
 
         if not termino.strip():
             messagebox.showwarning("Advertencia", "Debe ingresar un término de búsqueda válido.")
-            # Corregido: Usar el DataFrame directamente en lugar de llamar al método
             self._actualizar_tabla(self.tabla_resultados, self.motor.datos_descripcion)
             return None
 
@@ -310,11 +319,12 @@ class InterfazGrafica(tk.Tk):
             self._actualizar_tabla(self.tabla_resultados, resultados, mostrar_limitado=True)
             self.btn_exportar["state"] = "normal"
             self.barra_estado.config(text=f"Búsqueda completada: {len(resultados)} resultados")
+            return resultados
         else:
             self.tabla_resultados.delete(*self.tabla_resultados.get_children())
             self.btn_exportar["state"] = "disabled"
             self.barra_estado.config(text="No se encontraron resultados")
-        return resultados
+        
 
     def _exportar_resultados(self):
         resultados = self._ejecutar_busqueda()
