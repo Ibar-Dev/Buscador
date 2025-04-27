@@ -2,7 +2,6 @@
 
 Una aplicación GUI para realizar búsquedas avanzadas en archivos Excel, diseñada para facilitar el análisis de datos técnicos, inventarios o descripciones complejas.
 
-![Interfaz gráfica](https://via.placeholder.com/800x500.png?text=Captura+de+la+Interfaz) *(Ejemplo de interfaz)*
 
 ---
 
