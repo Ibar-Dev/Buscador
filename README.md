@@ -1,65 +1,91 @@
-# 🔍 Buscador Avanzado (v0.5.8)
+# 📊 Buscador Avanzado Excel (v0.5.8)
 
 ![Python](https://img.shields.io/badge/Python-3.7%2B-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
+![License](https://img.shields.io/badge/License-MIT-green) ![GUI](https://img.shields.io/badge/GUI-Tkinter-orange)
+![Dependencies](https://img.shields.io/badge/dependencies-pandas%20%7C%20openpyxl-brightgreen)
 ![version](https://img.shields.io/badge/version-0.5.8-informational)
 
-Una potente aplicación de escritorio para realizar búsquedas avanzadas en archivos Excel. Ideal para analizar diccionarios de datos y descripciones extensas, con soporte para operadores lógicos, comparaciones numéricas y exportación de resultados.
+Aplicación de escritorio con interfaz gráfica (Tkinter) diseñada para realizar búsquedas complejas y estructuradas en archivos Excel. Facilita el cruce de información entre un archivo "Diccionario" de referencia y un archivo "Descripciones" de datos, permitiendo guardar y exportar los resultados y las reglas de búsqueda.
 
 ---
 
 ## 📖 Tabla de Contenidos
 
-- [Características Principales](#✨-características-principales)
+- [Características Destacadas](#✨-características-destacadas)
+- [Arquitectura del Software](#🏗️-arquitectura-del-software)
+  - [Clases Principales](#clases-principales)
+  - [Enumeraciones](#enumeraciones)
 - [Requisitos Previos](#🛠️-requisitos-previos)
 - [Instalación](#⚙️-instalación)
-- [Modo de Uso](#🚀-modo-de-uso)
-  - [Cargar Archivos](#1-cargar-archivos)
-  - [Realizar Búsquedas](#2-realizar-búsquedas)
-  - [Exportar Resultados](#3-exportar-resultados)
-- [Ejemplos de Búsqueda](#💡-ejemplos-de-búsqueda)
-- [Configuración Automática](#🔧-configuración-automática)
-- [Capturas de Pantalla](#🖼️-capturas-de-pantalla)
+- [Configuración](#🔧-configuración)
+  - [Archivo de Configuración](#archivo-de-configuración-config_buscadorjson)
+  - [Columnas del Diccionario](#columnas-del-diccionario)
+- [Ejecución de la Aplicación](#🚀-ejecución-de-la-aplicación)
+- [Guía de Uso](#🗺️-guía-de-uso)
+  - [Carga de Archivos](#1-carga-de-archivos)
+  - [Realización de Búsquedas](#2-realización-de-búsquedas)
+  - [Lógica de Búsqueda Detallada](#lógica-de-búsqueda-detallada)
+  - [Guardar Reglas de Búsqueda](#3-guardar-reglas-de-búsqueda)
+  - [Exportar Reglas Guardadas](#4-exportar-reglas-guardadas)
+  - [Ayuda Integrada](#5-ayuda-integrada)
+- [Sintaxis de Búsqueda](#🔍-sintaxis-de-búsqueda)
+- [Registro de Actividad (Logging)](#📝-registro-de-actividad-logging)
+- [Capturas de Pantalla (Sugerencia)](#🖼️-capturas-de-pantalla-sugerencia)
 - [Licencia](#📜-licencia)
-- [Notas de la Versión (v0.5.8)](#📄-notas-de-la-versión-v058)
 - [Cómo Contribuir](#🤝-cómo-contribuir)
-- [Ayuda Adicional](#❓-ayuda-adicional)
 
 ---
 
-## ✨ Características Principales
+## ✨ Características Destacadas
 
--   **Búsqueda Especializada**: Carga archivos Excel diferenciados para términos de referencia (diccionario) y los datos donde se realizará la búsqueda (descripciones).
+-   **Interfaz Gráfica con Tkinter**: Interfaz de usuario intuitiva para facilitar la interacción.
+-   **Búsqueda en Dos Etapas**: Utiliza un archivo "Diccionario" para identificar términos clave y luego busca estos términos en un archivo "Descripciones".
 -   **Operadores de Búsqueda Avanzados**:
     -   Lógicos: `+` (AND), `|` o `/` (OR).
     -   Comparaciones Numéricas: `>`, `<`, `>=`, `<=`.
-    -   Rangos Numéricos: `num1-num2` (ej: `10-20`).
-    -   Negación de Términos: `#término_a_excluir`.
--   **Exportación Flexible**: Permite guardar tanto las reglas de búsqueda individuales como un consolidado de todos los resultados en formato Excel.
--   **Interfaz Gráfica Intuitiva**: Desarrollada con Tkinter para una experiencia de usuario sencilla y directa.
+    -   Rangos Numéricos: `num1-num2`.
+    -   Negación: `#termino_a_excluir`.
+    -   Soporte para Unidades: Reconoce unidades junto a valores numéricos (ej: `>1000w`, `<50kg`).
+-   **Extractor de Magnitudes**: Capacidad para identificar y extraer cantidades numéricas asociadas a unidades predefinidas (ej: "16GB", "100W").
+-   **Gestión de Reglas**: Permite guardar reglas de búsqueda (término, origen y resultados) y exportarlas a un único archivo Excel con múltiples hojas.
+-   **Configuración Persistente**: Guarda las últimas rutas de archivos y la configuración de columnas del diccionario en un archivo `config_buscador.json`.
+-   **Visualización de Datos**: Muestra vistas previas del diccionario y los resultados en tablas (Treeview) con ordenamiento por columnas.
+-   **Manejo de Errores y Logging**: Sistema robusto de mensajes al usuario y registro detallado de operaciones y errores en `buscador_app.log`.
+-   **Validación Dinámica de Operadores**: La interfaz habilita/deshabilita botones de operadores según la validez del término de búsqueda actual.
+
+---
+
+## 🏗️ Arquitectura del Software
+
+El script está estructurado en varias clases y enumeraciones para organizar la lógica de la aplicación:
+
+### Clases Principales
+    -   `ManejadorExcel`: Encargada de la carga y validación inicial de archivos Excel (`.xls`, `.xlsx`) usando `pandas`.
+    -   `MotorBusqueda`: Contiene la lógica central para realizar las búsquedas, parsear términos, aplicar filtros y gestionar los DataFrames.
+    -   `ExtractorMagnitud`: Utilidad para identificar y extraer valores numéricos asociados a magnitudes y unidades específicas dentro de cadenas de texto.
+    -   `InterfazGrafica`: Construye y gestiona todos los elementos de la interfaz de usuario (ventanas, botones, tablas, etc.) utilizando `tkinter` y `tkinter.ttk`. Coordina las interacciones del usuario con el `MotorBusqueda`.
+
+### Enumeraciones
+    -   `OrigenResultados`: Define los diferentes caminos o flujos por los cuales se pueden obtener y clasificar los resultados de una búsqueda (ej: vía diccionario con resultados, búsqueda directa, etc.). Esto es crucial para la lógica de guardado de reglas.
 
 ---
 
 ## 🛠️ Requisitos Previos
 
 -   Python 3.7 o superior.
--   Las siguientes librerías de Python:
+-   Librerías de Python:
     -   `pandas`
-    -   `openpyxl` (necesaria para la manipulación de archivos `.xlsx`)
-    -   `tkinter` (generalmente incluido en la instalación estándar de Python)
+    -   `openpyxl` (para leer y escribir archivos `.xlsx`)
+    -   `tkinter` (generalmente incluido con la instalación estándar de Python)
 
 ---
 
 ## ⚙️ Instalación
 
-1.  **Clona el repositorio (si aplica) o descarga los archivos fuente.**
-    ```bash
-    # Ejemplo si estuviera en un repositorio Git
-    # git clone https://tu_repositorio/buscador_avanzado.git
-    # cd buscador_avanzado
-    ```
+1.  **Descarga o Clona el Script**:
+    Obtén el archivo Python principal (ej: `buscador_excel_avanzado.py`).
 
-2.  **Se recomienda crear y activar un entorno virtual:**
+2.  **Crea un Entorno Virtual (Recomendado)**:
     ```bash
     python -m venv venv
     # En Windows
@@ -68,84 +94,29 @@ Una potente aplicación de escritorio para realizar búsquedas avanzadas en arch
     source venv/bin/activate
     ```
 
-3.  **Instala las dependencias necesarias:**
+3.  **Instala las Dependencias**:
     ```bash
     pip install pandas openpyxl
     ```
 
 ---
 
-## 🚀 Modo de Uso
+## 🔧 Configuración
 
-1.  **Ejecuta la aplicación:**
-    ```bash
-    python tu_script_principal.py
-    ```
-    *(Reemplaza `tu_script_principal.py` con el nombre real de tu archivo de entrada)*
+### Archivo de Configuración (`config_buscador.json`)
+    La aplicación crea y utiliza un archivo `config_buscador.json` en el mismo directorio donde se ejecuta. Este archivo almacena:
+    -   `last_dic_path`: Ruta al último archivo de Diccionario cargado.
+    -   `last_desc_path`: Ruta al último archivo de Descripciones cargado.
+    -   `indices_columnas_busqueda_dic`: Lista de índices (basados en 0) de las columnas a utilizar del archivo Diccionario para la búsqueda.
 
-### 1. Cargar Archivos
-    -   **Diccionario**: Selecciona el archivo Excel que contiene los términos de referencia.
-    -   **Descripciones**: Selecciona el archivo Excel con los datos sobre los cuales deseas realizar la búsqueda.
-
-### 2. Realizar Búsquedas
-    -   Introduce tus términos de búsqueda en el campo designado.
-    -   Utiliza los operadores avanzados para refinar tus consultas. Consulta la sección de "Ayuda" (botón `?`) dentro de la aplicación para una guía detallada de los operadores.
-
-### 3. Exportar Resultados
-    -   **Guardar Regla**: Guarda la regla de búsqueda actual y sus resultados en un archivo Excel.
-    -   **Exportar Todo**: Exporta todas las reglas de búsqueda que hayas guardado durante la sesión a un único archivo Excel.
+### Columnas del Diccionario
+    Por defecto, la aplicación utiliza las columnas en los índices `[0, 3]` del archivo Diccionario para realizar las búsquedas y extraer términos. Puedes cambiar esto modificando el archivo `config_buscador.json` (si ya existe) o se guardará tu selección si la aplicación permite configurarlo vía GUI en el futuro.
 
 ---
 
-## 💡 Ejemplos de Búsqueda
+## 🚀 Ejecución de la Aplicación
 
--   `router + cisco`: Encuentra descripciones que contengan **ambos** términos "router" Y "cisco".
--   `switch | ap / ubiquiti`: Busca descripciones que contengan "switch" O "ap" O "ubiquiti".
--   `>1000w`: Localiza valores numéricos estrictamente mayores a 1000, asociados a la unidad "w" (vatios).
--   `10-20 puertos`: Identifica rangos numéricos entre 10 y 20 (inclusivo) seguidos del término "puertos".
--   `switch + #gestionable`: Busca el término "switch" pero excluye aquellas entradas que también contengan "gestionable".
+Una vez instaladas las dependencias, ejecuta el script desde tu terminal:
 
----
-
-## 🔧 Configuración Automática
-
-La aplicación gestiona y guarda automáticamente la siguiente información para mejorar tu experiencia en sesiones futuras:
--   Las rutas de los últimos archivos de Diccionario y Descripciones cargados.
--   Los índices de las columnas seleccionadas para la búsqueda en el diccionario.
-
----
-
-## 🖼️ Capturas de Pantalla
-
-*(¡Es el momento ideal para mostrar tu aplicación en acción!)*
-
-*Ejemplo de cómo podrías añadir una imagen:*
-*Sugerencia: Coloca tus imágenes en una carpeta (ej. `docs/images/`) dentro de tu proyecto y enlaza a ellas.*
-
----
-
-## 📜 Licencia
-
-Este proyecto se distribuye bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más detalles.
-
----
-
-## 📄 Notas de la Versión (v0.5.8)
-
--   Mejoras significativas en la validación interna de los operadores de búsqueda.
--   Implementado el soporte para unidades en comparaciones numéricas (ej: `>1000w`, `<50kg`).
--   Optimización del rendimiento general, especialmente notable en búsquedas sobre grandes volúmenes de datos.
-
----
-
-## 🤝 Cómo Contribuir
-
-¡Las contribuciones son siempre bienvenidas! Si tienes ideas, sugerencias o encuentras algún error:
-1.  Abre un "Issue" en el repositorio para discutir cambios o reportar bugs.
-2.  Si deseas aportar código, por favor, haz un "Fork" del repositorio y envía un "Pull Request" con tus mejoras.
-
----
-
-## ❓ Ayuda Adicional
-
-> **Nota Importante**: Para una guía detallada sobre el uso de los operadores de búsqueda y otras funcionalidades, por favor, utiliza el botón de ayuda (`?`) integrado en la aplicación.
+```bash
+python tu_nombre_de_script.py
