@@ -210,7 +210,6 @@ class MotorBusqueda:
         return palabras_analizadas
 
     def _generar_mascara_para_un_termino(self, df: pd.DataFrame, cols_validas: List[str], termino_analizado: Dict[str, Any]) -> pd.Series:
-        # (Sin cambios)
         mask_item_total = pd.Series(False, index=df.index)
         tipo, valor = termino_analizado['tipo'], termino_analizado['valor']
 
@@ -221,17 +220,61 @@ class MotorBusqueda:
                 if tipo == 'str':
                     mask_col_item = col.astype(str).str.contains(r"\b"+re.escape(str(valor))+r"\b", case=False, na=False, regex=True)
                 elif tipo in ['gt', 'lt', 'ge', 'le']:
-                    col_num = pd.to_numeric(col, errors='coerce')
-                    if tipo == 'gt': mask_col_item = col_num > valor
-                    elif tipo == 'lt': mask_col_item = col_num < valor
-                    elif tipo == 'ge': mask_col_item = col_num >= valor
-                    else: mask_col_item = col_num <= valor # le
-                    mask_col_item = mask_col_item.fillna(False)
+                    # Convertir la columna a string para buscar patrones
+                    col_str = col.astype(str)
+                    
+                    # Extraer el valor numérico y la unidad/palabra asociada
+                    valor_str = str(valor)
+                    match = re.match(r'(\d+(?:[.,]\d+)?)([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)?', valor_str)
+                    
+                    if match:
+                        num_valor = float(match.group(1).replace(',', '.'))
+                        unidad = match.group(2).strip() if match.group(2) else None
+                        
+                        # Buscar patrones numéricos en la columna
+                        patrones_numeros = re.finditer(r'(\d+(?:[.,]\d+)?)([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)?', col_str)
+                        
+                        for match_num in patrones_numeros:
+                            num_col = float(match_num.group(1).replace(',', '.'))
+                            unidad_col = match_num.group(2).strip() if match_num.group(2) else None
+                            
+                            # Verificar la condición numérica
+                            cumple_condicion = False
+                            if tipo == 'gt': cumple_condicion = num_col > num_valor
+                            elif tipo == 'lt': cumple_condicion = num_col < num_valor
+                            elif tipo == 'ge': cumple_condicion = num_col >= num_valor
+                            else: cumple_condicion = num_col <= num_valor  # le
+                            
+                            if cumple_condicion:
+                                # Si hay unidad especificada, verificar que coincida
+                                if unidad:
+                                    if unidad_col:
+                                        # Si la unidad es una sola letra, buscar coincidencia exacta
+                                        if len(unidad) == 1:
+                                            if unidad.lower() == unidad_col.lower():
+                                                mask_col_item |= col_str.str.contains(r"\b"+re.escape(match_num.group(0))+r"\b", case=False, na=False, regex=True)
+                                        else:
+                                            # Si es una palabra, buscar que contenga la palabra
+                                            if unidad.lower() in unidad_col.lower():
+                                                mask_col_item |= col_str.str.contains(r"\b"+re.escape(match_num.group(0))+r"\b", case=False, na=False, regex=True)
+                                else:
+                                    # Si no hay unidad especificada, solo verificar el número
+                                    mask_col_item |= col_str.str.contains(r"\b"+re.escape(match_num.group(0))+r"\b", case=False, na=False, regex=True)
+                    else:
+                        # Si no hay unidad, comportamiento original
+                        col_num = pd.to_numeric(col, errors='coerce')
+                        if tipo == 'gt': mask_col_item = col_num > num_valor
+                        elif tipo == 'lt': mask_col_item = col_num < num_valor
+                        elif tipo == 'ge': mask_col_item = col_num >= num_valor
+                        else: mask_col_item = col_num <= num_valor  # le
+                        mask_col_item = mask_col_item.fillna(False)
+                
                 elif tipo == 'range':
                     min_v, max_v = valor
                     col_num = pd.to_numeric(col, errors='coerce')
                     mask_col_item = (col_num >= min_v) & (col_num <= max_v)
                     mask_col_item = mask_col_item.fillna(False)
+                
                 mask_item_total |= mask_col_item
             except Exception as e:
                 logging.warning(f"Error procesando término '{termino_analizado.get('original', 'N/A')}' en columna '{col_n}': {e}")
@@ -555,14 +598,20 @@ class InterfazGrafica(tk.Tk):
     Ej: `switch / conmutador`
 
 - Comparaciones numéricas (aplican a columnas configuradas si son numéricas):
-  * `>numero`: Mayor que. Ej: `>1000`
-  * `<numero`: Menor que. Ej: `<50`
-  * `>=numero` o `≥numero`: Mayor o igual que. Ej: `>=48`
-  * `<=numero` o `≤numero`: Menor o igual que. Ej: `<=10.5`
+  * `>numero`: Mayor que. Ej: `>1000` o `>1000w`
+  * `<numero`: Menor que. Ej: `<50` o `<50v`
+  * `>=numero` o `≥numero`: Mayor o igual que. Ej: `>=48` o `>=48a`
+  * `<=numero` o `≤numero`: Menor o igual que. Ej: `<=10.5` o `<=10.5w`
+  * Los operadores de comparación pueden usarse al inicio de la búsqueda
+  * Pueden ir seguidos de una letra o unidad (ej: w, v, a)
+  * Si la unidad es una letra, debe estar pegada al número (ej: >1000w)
+  * Si la unidad es una palabra, puede estar separada por espacio (ej: >1000 vatios)
+  * La búsqueda es insensible a mayúsculas/minúsculas para las unidades
 
 - Rangos numéricos (ambos incluidos):
   * `num1-num2`: Entre num1 y num2. Ej: `10-20` (buscará 10, 11, ..., 20)
   * El número antes del guión debe ser un dígito
+  * Requiere al menos una palabra antes de usar el operador de rango
 
 - Negación (excluir filas):
   * `#término`: Excluye filas que coincidan con 'término'.
@@ -578,6 +627,9 @@ Restricciones y Reglas:
 4. El operador de rango (-) requiere un número antes del guión
 5. Los operadores lógicos (+ | /) requieren un término antes y después
 6. No se permiten espacios entre operadores y números (ej: `> 10` es inválido)
+7. El operador de rango (-) requiere al menos una palabra antes de usarlo
+8. Para unidades de una letra, debe estar pegada al número (ej: >1000w)
+9. Para palabras como unidades, puede haber espacio (ej: >1000 vatios)
 
 Notas sobre la Negación:
 ----------------------
@@ -713,31 +765,47 @@ Notas:
         self.lbl_desc_cargado.config(text=desc_display)
 
     def _actualizar_botones_estado_general(self):
-        # (Sin cambios respecto a la versión anterior del script)
+        """Actualiza el estado de los botones basado en el estado general de la aplicación."""
         dic_cargado = self.motor.datos_diccionario is not None
         desc_cargado = self.motor.datos_descripcion is not None
 
-        self.btn_cargar_descripciones["state"] = "normal" if dic_cargado else "disabled"
-        self.btn_buscar["state"] = "normal" if dic_cargado and desc_cargado else "disabled"
+        # Estado base para todos los botones de operadores
+        estado_operadores = 'normal' if dic_cargado else 'disabled'
+        
+        # Actualizar estado de botones de operadores
+        self.btn_and['state'] = estado_operadores
+        self.btn_or['state'] = estado_operadores
+        self.btn_not['state'] = estado_operadores
+        self.btn_gt['state'] = estado_operadores
+        self.btn_lt['state'] = estado_operadores
+        self.btn_ge['state'] = estado_operadores
+        self.btn_le['state'] = estado_operadores
+        self.btn_range['state'] = estado_operadores
+
+        # Estado de otros botones
+        self.btn_cargar_descripciones['state'] = 'normal' if dic_cargado else 'disabled'
+        self.btn_buscar['state'] = 'normal' if dic_cargado and desc_cargado else 'disabled'
         
         # Lógica botón Salvar Regla
         puede_salvar_fcd = self.df_candidato_diccionario is not None and not self.df_candidato_diccionario.empty
         puede_salvar_rfd_o_rdd = self.df_candidato_descripcion is not None and not self.df_candidato_descripcion.empty
-        estado_salvar = "disabled"
+        estado_salvar = 'disabled'
 
         if self.origen_principal_resultados != OrigenResultados.NINGUNO:
             if self.origen_principal_resultados.es_directo_descripcion: # Incluye búsqueda vacía
-                if puede_salvar_rfd_o_rdd: estado_salvar = "normal"
+                if puede_salvar_rfd_o_rdd: estado_salvar = 'normal'
             elif self.origen_principal_resultados.es_via_diccionario:
                 # Se puede salvar si hay FCD, o si hay RFD (y el origen es VIA_DICCIONARIO_CON_RESULTADOS_DESC)
                 if puede_salvar_fcd or \
                    (self.origen_principal_resultados == OrigenResultados.VIA_DICCIONARIO_CON_RESULTADOS_DESC and puede_salvar_rfd_o_rdd):
-                    estado_salvar = "normal"
-        self.btn_salvar_regla["state"] = estado_salvar
+                    estado_salvar = 'normal'
+        self.btn_salvar_regla['state'] = estado_salvar
         
-        self.btn_exportar["state"] = "normal" if self.reglas_guardadas else "disabled"
-        # No olvidar actualizar los botones de operadores también si fuera necesario globalmente,
-        # pero _on_texto_busqueda_change ya lo hace de forma más específica.
+        self.btn_exportar['state'] = 'normal' if self.reglas_guardadas else 'disabled'
+
+        # Si el diccionario está cargado, actualizar el estado específico de los botones de operadores
+        if dic_cargado:
+            self._actualizar_estado_botones_operadores()
 
     def _cargar_diccionario(self):
         # (Sin cambios respecto a la versión anterior del script)
@@ -1250,15 +1318,24 @@ Notas:
         # Botón NOT (#): deshabilitado si el segmento ya tiene negación
         self.btn_not['state'] = 'disabled' if tiene_negacion_segmento else 'normal'
         
-        # Operadores de comparación/rango: deshabilitados si el segmento ya es de tipo comparativo/rango
-        # o si ya contiene un operador visual de ese tipo (para evitar ej. ">10<20" en el mismo término)
-        estado_comp_rango = 'disabled' if es_termino_comparativo_o_rango or tiene_comparacion_o_rango_visible else 'normal'
+        # Estado para operadores de comparación (>, <, >=, <=)
+        estado_comparacion = 'disabled' if es_termino_comparativo_o_rango or tiene_comparacion_o_rango_visible else 'normal'
         
-        # Excepción: si el segmento es solo ">" o "<", permitir "≥" (">=") o "≤" ("<=")
-        # Esto es manejado por _insertar_operador_validado, aquí mantenemos la lógica más simple para el estado.
-
-        for btn in [self.btn_gt, self.btn_lt, self.btn_ge, self.btn_le, self.btn_range]:
-            btn.config(state=estado_comp_rango)
+        # Estado para operador de rango (-)
+        estado_rango = 'disabled'
+        if not texto_completo.strip():  # Si no hay texto, deshabilitar rango
+            estado_rango = 'disabled'
+        elif es_termino_comparativo_o_rango or tiene_comparacion_o_rango_visible:  # Si ya hay comparación/rango
+            estado_rango = 'disabled'
+        else:
+            estado_rango = 'normal'
+        
+        # Aplicar estados a los botones
+        for btn in [self.btn_gt, self.btn_lt, self.btn_ge, self.btn_le]:
+            btn.config(state=estado_comparacion)
+        
+        # Aplicar estado específico al botón de rango
+        self.btn_range.config(state=estado_rango)
         
         # Operadores lógicos (+, |): deshabilitados si el texto está vacío o el último carácter no es un espacio
         # y es un operador lógico.
@@ -1271,96 +1348,6 @@ Notas:
         
         self.btn_and.config(state=estado_logico)
         self.btn_or.config(state=estado_logico)
-
-    def _insertar_operador_validado(self, operador_a_insertar: str):
-        """Inserta un operador en la entrada de búsqueda si es lógicamente válido en el contexto actual."""
-        texto_actual = self.texto_busqueda_var.get()
-        cursor_pos = self.entrada_busqueda.index(tk.INSERT)
-        
-        contexto_izq_bruto = texto_actual[:cursor_pos]
-        contexto_izq_limpio = contexto_izq_bruto.rstrip() # Para ver el último carácter significativo
-
-        # Determinar el "término actual" o "segmento lógico" donde está el cursor
-        # para una validación más precisa de operadores de comparación/rango y negación.
-        inicio_termino_actual = 0
-        temp_pos = contexto_izq_bruto.rfind('+')
-        if temp_pos != -1: inicio_termino_actual = temp_pos + 1
-        temp_pos = contexto_izq_bruto.rfind('|')
-        if temp_pos != -1: inicio_termino_actual = max(inicio_termino_actual, temp_pos + 1)
-        
-        termino_bajo_cursor = texto_actual[inicio_termino_actual:cursor_pos].lstrip()
-
-        # Reglas de validación
-        if operador_a_insertar in ['>', '<', '>=', '<=']:
-            # No permitir si el término actual ya es de tipo comparativo/rango o si tiene un operador visual
-            # (a menos que se esté completando ">" con "=" -> ">=")
-            if any(op in termino_bajo_cursor for op in ['>', '<', '-']): # Chequeo visual simple
-                 # Permitir insertar '=' si el carácter anterior es '>' o '<'
-                if operador_a_insertar == '=' and (termino_bajo_cursor.endswith('>') or termino_bajo_cursor.endswith('<')):
-                    pass # Se permite completar a >= o <=
-                elif (operador_a_insertar == '>=' or operador_a_insertar == '<=') and (termino_bajo_cursor.endswith('>') or termino_bajo_cursor.endswith('<')):
-                    # Evitar > >=
-                    return 
-                elif not (operador_a_insertar in ['>=', '<='] and len(termino_bajo_cursor) == 0): # Permitir >= o <= al inicio de un término
-                     if any(op in termino_bajo_cursor for op in ['>', '<', '-', '>=', '<=']): # Más estricto
-                        logging.debug(f"Bloqueado '{operador_a_insertar}': término ya tiene operador de comparación/rango.")
-                        return
-            # No permitir si el carácter justo a la izquierda es un comparador (evitar >>, <>, etc.)
-            # a menos que sea para formar >= o <=
-            if contexto_izq_limpio and contexto_izq_limpio[-1] in ['>', '<'] and operador_a_insertar not in ['=','>=','<=']: # Permitir > pero no >>
-                return
-            if contexto_izq_limpio and contexto_izq_limpio[-1] in ['>', '<'] and operador_a_insertar in ['>','<']:
-                return # No permitir >> o <>
-            if contexto_izq_limpio and contexto_izq_limpio[-1] in ['.'] : # evitar .>
-                return
-
-
-        elif operador_a_insertar == '-': # Operador de rango
-            # No permitir si el término actual ya tiene un comparador
-            if any(op in termino_bajo_cursor for op in ['>', '<', '>=', '<=']):
-                logging.debug(f"Bloqueado '-': término ya tiene operador de comparación.")
-                return
-            # Requerir que el carácter a la izquierda (si existe y no es espacio) sea un dígito
-            if contexto_izq_limpio and not contexto_izq_limpio[-1].isdigit():
-                logging.debug(f"Bloqueado '-': carácter anterior no es dígito.")
-                return
-            if not contexto_izq_limpio: # No permitir '-' al inicio absoluto o de segmento si no hay dígito antes.
-                return
-
-        elif operador_a_insertar == '#': # Operador de negación
-            # Solo se puede insertar al inicio de un "término lógico" (después de espacio, +, | o al inicio de todo)
-            # y si el término actual no comienza ya con #
-            if termino_bajo_cursor.startswith('#'):
-                logging.debug(f"Bloqueado '#': término actual ya comienza con '#'.")
-                return
-            # Si el contexto a la izquierda no es vacío y no termina en espacio o lógico, no permitir.
-            if contexto_izq_bruto and not contexto_izq_bruto[-1] in [' ', '+', '|']:
-                 # Forzar inserción al inicio del término actual si es posible
-                if inicio_termino_actual < cursor_pos : # Si no estamos ya al inicio del término lógico
-                    self.entrada_busqueda.insert(inicio_termino_actual, '#')
-                    return # Ya se insertó
-                # Si no, no permitir (ej: "abc#")
-                logging.debug(f"Bloqueado '#': no está al inicio de un término lógico.")
-                return
-
-
-        elif operador_a_insertar in ['+', '|']: # Operadores lógicos
-            if not texto_actual.strip(): # No insertar si la entrada está vacía
-                return
-            # No insertar si el último carácter significativo es ya un operador lógico
-            if contexto_izq_limpio and contexto_izq_limpio[-1] in ['+', '|']:
-                logging.debug(f"Bloqueado '{operador_a_insertar}': duplicado de operador lógico.")
-                return
-            # No insertar si el carácter a la izquierda es un espacio y antes de eso hay un operador
-            if len(contexto_izq_limpio) > 1 and contexto_izq_bruto.endswith(' ') and contexto_izq_limpio[-1] in ['+','|']:
-                 logging.debug(f"Bloqueado '{operador_a_insertar}': espacio después de operador lógico.")
-                 return
-
-
-        # Insertar operador
-        self.entrada_busqueda.insert(tk.INSERT, operador_a_insertar)
-        # No es necesario llamar a _actualizar_estado_botones_operadores aquí,
-        # ya que el trace en texto_busqueda_var lo hará automáticamente.
     # <<< FIN: Nuevos métodos para validar y actualizar botones de operadores <<<
 
     def on_closing(self):
@@ -1368,6 +1355,49 @@ Notas:
         logging.info("Cerrando la aplicación...")
         self._guardar_configuracion()
         self.destroy()
+
+    def _insertar_operador_validado(self, operador: str):
+        """Inserta un operador en la posición actual del cursor si es válido hacerlo."""
+        texto_actual = self.texto_busqueda_var.get()
+        cursor_pos = self.entrada_busqueda.index(tk.INSERT)
+        
+        # Obtener el segmento actual
+        inicio_segmento = 0
+        temp_pos = texto_actual.rfind('+', 0, cursor_pos)
+        if temp_pos != -1: inicio_segmento = temp_pos + 1
+        temp_pos = texto_actual.rfind('|', 0, cursor_pos)
+        if temp_pos != -1: inicio_segmento = max(inicio_segmento, temp_pos + 1)
+        
+        segmento_actual = texto_actual[inicio_segmento:cursor_pos].strip()
+        
+        # Validar si se puede insertar el operador
+        puede_insertar = True
+        
+        if operador in ['>', '<', '>=', '<=']:
+            # No permitir si ya hay un operador de comparación en el segmento
+            if any(op in segmento_actual for op in ['>', '<', '>=', '<=', '-']):
+                puede_insertar = False
+        elif operador == '-':
+            # No permitir si no hay texto antes o ya hay un operador de comparación/rango
+            if not segmento_actual or any(op in segmento_actual for op in ['>', '<', '>=', '<=', '-']):
+                puede_insertar = False
+        elif operador in ['+', '|']:
+            # No permitir si el texto está vacío o termina en operador lógico
+            if not texto_actual.strip() or texto_actual.rstrip()[-1] in ['+', '|']:
+                puede_insertar = False
+        elif operador == '#':
+            # No permitir si ya hay negación en el segmento
+            if segmento_actual.startswith('#'):
+                puede_insertar = False
+        
+        if puede_insertar:
+            # Insertar el operador
+            nuevo_texto = texto_actual[:cursor_pos] + operador + texto_actual[cursor_pos:]
+            self.texto_busqueda_var.set(nuevo_texto)
+            # Mover el cursor después del operador insertado
+            self.entrada_busqueda.icursor(cursor_pos + len(operador))
+            # Actualizar estado de botones
+            self._actualizar_estado_botones_operadores()
 
 # --- Bloque Principal (`if __name__ == "__main__":`) ---
 if __name__ == "__main__":
