@@ -427,11 +427,13 @@ class InterfazGrafica(tk.Tk):
         self._configurar_tags_treeview()
         self._configurar_orden_tabla(self.tabla_resultados)
         self._actualizar_estado("Listo. Cargue Diccionario y Descripciones.")
+        
+        # Deshabilitar todos los botones operacionales al inicio
+        self._deshabilitar_botones_operadores()
+        
+        # Actualizar el estado general de los botones
         self._actualizar_botones_estado_general()
         
-        # >>> INICIO: Llamada inicial para estado de botones de operadores <<<
-        self._actualizar_estado_botones_operadores()
-        # <<< FIN: Llamada inicial para estado de botones de operadores <<<
         logging.info("Interfaz Gráfica inicializada.")
 
     # >>> INICIO: Definición del callback _on_texto_busqueda_change <<<
@@ -769,18 +771,25 @@ Notas:
         dic_cargado = self.motor.datos_diccionario is not None
         desc_cargado = self.motor.datos_descripcion is not None
 
-        # Estado base para todos los botones de operadores
-        estado_operadores = 'normal' if dic_cargado else 'disabled'
+        # Primero actualizar el estado base de los botones de operadores según el diccionario
+        estado_base_operadores = 'normal' if dic_cargado else 'disabled'
         
-        # Actualizar estado de botones de operadores
-        self.btn_and['state'] = estado_operadores
-        self.btn_or['state'] = estado_operadores
-        self.btn_not['state'] = estado_operadores
-        self.btn_gt['state'] = estado_operadores
-        self.btn_lt['state'] = estado_operadores
-        self.btn_ge['state'] = estado_operadores
-        self.btn_le['state'] = estado_operadores
-        self.btn_range['state'] = estado_operadores
+        # Establecer el estado base de los botones de operadores
+        self.btn_and['state'] = estado_base_operadores
+        self.btn_or['state'] = estado_base_operadores
+        self.btn_not['state'] = estado_base_operadores
+        self.btn_gt['state'] = estado_base_operadores
+        self.btn_lt['state'] = estado_base_operadores
+        self.btn_ge['state'] = estado_base_operadores
+        self.btn_le['state'] = estado_base_operadores
+        self.btn_range['state'] = estado_base_operadores
+
+        # Solo aplicar las validaciones específicas de los operadores si el diccionario está cargado
+        if dic_cargado:
+            self._actualizar_estado_botones_operadores()
+        else:
+            # Si no hay diccionario cargado, asegurarse de que todos los botones operacionales estén deshabilitados
+            self._deshabilitar_botones_operadores()
 
         # Estado de otros botones
         self.btn_cargar_descripciones['state'] = 'normal' if dic_cargado else 'disabled'
@@ -803,44 +812,48 @@ Notas:
         
         self.btn_exportar['state'] = 'normal' if self.reglas_guardadas else 'disabled'
 
-        # Si el diccionario está cargado, actualizar el estado específico de los botones de operadores
-        if dic_cargado:
-            self._actualizar_estado_botones_operadores()
-
     def _cargar_diccionario(self):
-        # (Sin cambios respecto a la versión anterior del script)
-        last_dir = os.path.dirname(self.config.get("last_dic_path", "") or "") or None
-        ruta = filedialog.askopenfilename(title="Seleccionar Archivo Diccionario", filetypes=[("Archivos Excel", "*.xlsx *.xls")], initialdir=last_dir)
-        if not ruta: logging.info("Carga de diccionario cancelada."); return
+        """Carga el archivo de diccionario y actualiza la interfaz."""
+        
+        try:
+            # Siempre mantener el botón de cargar diccionario habilitado
+            self.btn_cargar_diccionario['state'] = 'normal'
+            
+            last_dir = os.path.dirname(self.config.get("last_dic_path", "") or "") or None
+            ruta = filedialog.askopenfilename(title="Seleccionar Archivo Diccionario", filetypes=[("Archivos Excel", "*.xlsx *.xls")], initialdir=last_dir)
+            if not ruta: logging.info("Carga de diccionario cancelada."); return
 
-        nombre_archivo = os.path.basename(ruta)
-        self._actualizar_estado(f"Cargando diccionario: {nombre_archivo}...")
-        self._actualizar_tabla(self.tabla_diccionario, None) 
-        self.resultados_actuales = None
-        self.df_candidato_diccionario = None
-        self.df_candidato_descripcion = None
-        self.origen_principal_resultados = OrigenResultados.NINGUNO
-        self._actualizar_tabla(self.tabla_resultados, None) 
+            nombre_archivo = os.path.basename(ruta)
+            self._actualizar_estado(f"Cargando diccionario: {nombre_archivo}...")
+            self._actualizar_tabla(self.tabla_diccionario, None) 
+            self.resultados_actuales = None
+            self.df_candidato_diccionario = None
+            self.df_candidato_descripcion = None
+            self.origen_principal_resultados = OrigenResultados.NINGUNO
+            self._actualizar_tabla(self.tabla_resultados, None) 
 
-        if self.motor.cargar_excel_diccionario(ruta):
-            self._guardar_configuracion() 
-            df_dic = self.motor.datos_diccionario
-            if df_dic is not None:
-                num_filas = len(df_dic)
-                cols_busqueda_nombres = self.motor._obtener_nombres_columnas_busqueda(df_dic)
-                indices_str = ', '.join(map(str, self.motor.indices_columnas_busqueda_dic))
-                lbl_text = f"Vista Previa Diccionario (Índices: {indices_str})"
-                if cols_busqueda_nombres: lbl_text = f"Vista Previa Dic ({', '.join(cols_busqueda_nombres)} - Índices: {indices_str})"
-                self.lbl_tabla_diccionario.config(text=lbl_text)
-                self._actualizar_tabla(self.tabla_diccionario, df_dic, limite_filas=100, columnas_a_mostrar=cols_busqueda_nombres)
-                self.title(f"Buscador - Dic: {nombre_archivo}")
-                self._actualizar_estado(f"Diccionario '{nombre_archivo}' ({num_filas} filas) cargado.")
-        else:
-            self._actualizar_estado("Error al cargar el diccionario.")
-            self.title("Buscador Avanzado (con Salvar Regla)")
+            if self.motor.cargar_excel_diccionario(ruta):
+                self._guardar_configuracion() 
+                df_dic = self.motor.datos_diccionario
+                if df_dic is not None:
+                    num_filas = len(df_dic)
+                    cols_busqueda_nombres = self.motor._obtener_nombres_columnas_busqueda(df_dic)
+                    indices_str = ', '.join(map(str, self.motor.indices_columnas_busqueda_dic))
+                    lbl_text = f"Vista Previa Diccionario (Índices: {indices_str})"
+                    if cols_busqueda_nombres: lbl_text = f"Vista Previa Dic ({', '.join(cols_busqueda_nombres)} - Índices: {indices_str})"
+                    self.lbl_tabla_diccionario.config(text=lbl_text)
+                    self._actualizar_tabla(self.tabla_diccionario, df_dic, limite_filas=100, columnas_a_mostrar=cols_busqueda_nombres)
+                    self.title(f"Buscador - Dic: {nombre_archivo}")
+                    self._actualizar_estado(f"Diccionario '{nombre_archivo}' ({num_filas} filas) cargado.")
+            else:
+                self._actualizar_estado("Error al cargar el diccionario.")
+                self.title("Buscador Avanzado (con Salvar Regla)")
 
-        self._actualizar_etiquetas_archivos()
-        self._actualizar_botones_estado_general()
+            self._actualizar_etiquetas_archivos()
+            self._actualizar_botones_estado_general()
+        except Exception as e:
+            logging.error(f"Error al cargar el diccionario: {e}")
+            messagebox.showerror("Error al Cargar Diccionario", f"No se pudo cargar el archivo del diccionario:\n{e}")
 
     def _cargar_excel_descripcion(self):
         last_dir = os.path.dirname(self.config.get("last_desc_path", "") or "") or None
@@ -1358,6 +1371,10 @@ Notas:
 
     def _insertar_operador_validado(self, operador: str):
         """Inserta un operador en la posición actual del cursor si es válido hacerlo."""
+        # Si no hay diccionario cargado, no permitir la inserción
+        if self.motor.datos_diccionario is None:
+            return
+
         texto_actual = self.texto_busqueda_var.get()
         cursor_pos = self.entrada_busqueda.index(tk.INSERT)
         
@@ -1398,6 +1415,22 @@ Notas:
             self.entrada_busqueda.icursor(cursor_pos + len(operador))
             # Actualizar estado de botones
             self._actualizar_estado_botones_operadores()
+
+    def _deshabilitar_botones_operadores(self):
+        """Deshabilita todos los botones operacionales de la interfaz."""
+        # Deshabilitar botones de operadores lógicos
+        self.btn_and['state'] = 'disabled'
+        self.btn_or['state'] = 'disabled'
+        self.btn_not['state'] = 'disabled'
+        
+        # Deshabilitar botones de comparación
+        self.btn_gt['state'] = 'disabled'
+        self.btn_lt['state'] = 'disabled'
+        self.btn_ge['state'] = 'disabled'
+        self.btn_le['state'] = 'disabled'
+        
+        # Deshabilitar botón de rango
+        self.btn_range['state'] = 'disabled'
 
 # --- Bloque Principal (`if __name__ == "__main__":`) ---
 if __name__ == "__main__":
