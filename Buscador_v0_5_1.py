@@ -53,11 +53,16 @@ class ManejadorExcel:
             return df
         except FileNotFoundError:
             logging.error(f"Archivo no encontrado: {ruta}")
-            messagebox.showerror("Error", f"Archivo no encontrado:\n{ruta}")
+            messagebox.showerror("Error de Archivo", f"No se encontró el archivo:\n{ruta}\n\nVerifique que la ruta sea correcta y que el archivo exista.")
             return None
         except Exception as e:
             logging.exception(f"Error inesperado al cargar archivo: {ruta}")
-            messagebox.showerror("Error al Cargar", f"No se pudo cargar:\n{ruta}\nError: {e}\nVerifique archivo y 'openpyxl'.")
+            messagebox.showerror("Error al Cargar", 
+                f"No se pudo cargar el archivo:\n{ruta}\n\nError: {e}\n\n"
+                "Posibles causas:\n"
+                "- El archivo está siendo usado por otro programa\n"
+                "- No tiene instalado 'openpyxl' para archivos .xlsx\n"
+                "- El archivo está corrupto o en formato no soportado")
             return None
 
 class MotorBusqueda:
@@ -93,33 +98,54 @@ class MotorBusqueda:
         num_cols = len(self.datos_diccionario.columns)
         if not self.indices_columnas_busqueda_dic:
             logging.error("La lista de índices de columnas de búsqueda está vacía en la configuración.")
-            messagebox.showerror("Error Configuración", "No hay índices de columna definidos para la búsqueda en el diccionario.")
+            messagebox.showerror("Error de Configuración", 
+                "No hay índices de columna definidos para la búsqueda en el diccionario.\n\n"
+                "Por favor, configure los índices de las columnas que desea utilizar para la búsqueda.")
             return False
-        max_indice_requerido = max(self.indices_columnas_busqueda_dic) if self.indices_columnas_busqueda_dic else -1 # Evitar error si está vacía
+        max_indice_requerido = max(self.indices_columnas_busqueda_dic) if self.indices_columnas_busqueda_dic else -1
 
         if num_cols == 0:
             logging.error("Diccionario sin columnas.")
-            messagebox.showerror("Error Diccionario", "Archivo diccionario vacío o sin columnas.")
+            messagebox.showerror("Error de Diccionario", 
+                "El archivo del diccionario está vacío o no contiene columnas.\n\n"
+                "Verifique que el archivo:\n"
+                "- No esté vacío\n"
+                "- Tenga al menos una columna de datos\n"
+                "- Esté en formato Excel válido")
             return False
-        elif max_indice_requerido >= num_cols: # Si el índice máximo requerido es igual o mayor al número de columnas
+        elif max_indice_requerido >= num_cols:
             logging.error(f"Diccionario tiene {num_cols} cols, necesita índice {max_indice_requerido} (es decir, al menos {max_indice_requerido+1} columnas).")
-            messagebox.showerror("Error Diccionario", f"Diccionario necesita al menos {max_indice_requerido + 1} columnas (índices configurados: {self.indices_columnas_busqueda_dic}), pero tiene solo {num_cols}.")
+            messagebox.showerror("Error de Diccionario", 
+                f"El diccionario necesita al menos {max_indice_requerido + 1} columnas para los índices configurados ({self.indices_columnas_busqueda_dic}), "
+                f"pero solo tiene {num_cols}.\n\n"
+                "Por favor, verifique que:\n"
+                "- El archivo tiene suficientes columnas\n"
+                "- Los índices configurados son correctos")
             return False
         return True
 
     def _obtener_nombres_columnas_busqueda(self, df: pd.DataFrame) -> Optional[List[str]]:
-        # (Sin cambios)
-        if df is None: logging.error("Intento obtener cols de DataFrame nulo."); return None
-        columnas_disponibles = df.columns; cols_encontradas_nombres = []; num_cols_df = len(columnas_disponibles)
+        if df is None: 
+            logging.error("Intento obtener cols de DataFrame nulo.")
+            return None
+        columnas_disponibles = df.columns
+        cols_encontradas_nombres = []
+        num_cols_df = len(columnas_disponibles)
         indices_validos = []
         for indice in self.indices_columnas_busqueda_dic:
             if isinstance(indice, int) and 0 <= indice < num_cols_df:
                 cols_encontradas_nombres.append(columnas_disponibles[indice])
                 indices_validos.append(indice)
-            else: logging.warning(f"Índice {indice} inválido o fuera de rango (0-{num_cols_df-1}). Se omitirá.")
+            else:
+                logging.warning(f"Índice {indice} inválido o fuera de rango (0-{num_cols_df-1}). Se omitirá.")
         if not cols_encontradas_nombres:
             logging.error(f"No se encontraron columnas válidas para índices: {self.indices_columnas_busqueda_dic}")
-            messagebox.showerror("Error Diccionario", f"No hay columnas válidas para los índices configurados: {self.indices_columnas_busqueda_dic}")
+            messagebox.showerror("Error de Configuración", 
+                f"No hay columnas válidas para los índices configurados: {self.indices_columnas_busqueda_dic}\n\n"
+                "Por favor, verifique que:\n"
+                "- Los índices configurados son correctos\n"
+                "- Las columnas existen en el archivo\n"
+                "- Los índices están dentro del rango válido (0-{num_cols_df-1})")
             return None
         logging.debug(f"Columnas búsqueda diccionario: {cols_encontradas_nombres} (Índices: {indices_validos})")
         return cols_encontradas_nombres
@@ -246,19 +272,20 @@ class MotorBusqueda:
         return mask_final
 
     def buscar_en_descripciones_directo(self, term_buscar: str) -> pd.DataFrame:
-        # (Sin cambios)
-        logging.info(f"Búsqueda Directa en Descripciones: '{term_buscar}'");
+        logging.info(f"Búsqueda Directa en Descripciones: '{term_buscar}'")
         if self.datos_descripcion is None or self.datos_descripcion.empty:
             logging.warning("Intento de búsqueda directa sin descripciones cargadas o vacías.")
-            messagebox.showwarning("Faltan Datos", "No hay datos de descripciones cargados para realizar la búsqueda directa.")
+            messagebox.showwarning("Datos Faltantes", 
+                "No hay datos de descripciones cargados para realizar la búsqueda directa.\n\n"
+                "Por favor, cargue primero el archivo de descripciones.")
             return pd.DataFrame()
 
-        term_limpio = term_buscar.strip().upper();
+        term_limpio = term_buscar.strip().upper()
         if not term_limpio:
             logging.info("Término de búsqueda directa vacío. Devolviendo todas las descripciones.")
             return self.datos_descripcion.copy()
 
-        df_desc = self.datos_descripcion.copy();
+        df_desc = self.datos_descripcion.copy()
         res = pd.DataFrame(columns=df_desc.columns)
         try:
             txt_filas = df_desc.fillna('').astype(str).agg(' '.join, axis=1).str.upper()
@@ -276,11 +303,13 @@ class MotorBusqueda:
                 for p in palabras: mask |= txt_filas.str.contains(r"\b"+re.escape(p)+r"\b", regex=True, na=False)
             else: mask = txt_filas.str.contains(r"\b"+re.escape(term_limpio)+r"\b", regex=True, na=False)
 
-            res = df_desc[mask];
+            res = df_desc[mask]
             logging.info(f"Búsqueda directa completada. Resultados: {len(res)}.")
         except Exception as e:
             logging.exception("Error durante la búsqueda directa en descripciones.")
-            messagebox.showerror("Error Búsqueda Directa", f"Ocurrió un error:\n{e}")
+            messagebox.showerror("Error de Búsqueda", 
+                f"Ocurrió un error durante la búsqueda directa:\n{e}\n\n"
+                "Por favor, intente nuevamente o contacte al soporte técnico si el problema persiste.")
         return res
 
 # --- Clase ExtractorMagnitud ---
@@ -512,35 +541,50 @@ class InterfazGrafica(tk.Tk):
         self.update_idletasks()
 
     def _mostrar_ayuda(self):
-        # (Sin cambios)
         ayuda = """Sintaxis de Búsqueda en Diccionario:
 -------------------------------------
 - Texto simple: Busca la palabra o frase exacta (insensible a mayús/minús).
   Ej: `router cisco`
-- `término1 + término2`: Busca filas que contengan AMBOS términos (AND).
-  Ej: `tarjeta + 16 puertos`
-- `término1 | término2`: Busca filas que contengan AL MENOS UNO de los términos (OR).
-  Ej: `modulo | SFP`
-- `término1 / término2`: Alternativa para OR.
-  Ej: `switch / conmutador`
-- Comparaciones numéricas (aplican a columnas configuradas si son numéricas):
-  - `>numero`: Mayor que. Ej: `>1000`
-  - `<numero`: Menor que. Ej: `<50`
-  - `>=numero` o `≥numero`: Mayor o igual que. Ej: `>=48`
-  - `<=numero` o `≤numero`: Menor o igual que. Ej: `<=10.5`
-- Rangos numéricos (ambos incluidos):
-  - `num1-num2`: Entre num1 y num2. Ej: `10-20` (buscará 10, 11, ..., 20)
-- Negación (excluir filas):
-  - `#término`: Excluye filas que coincidan con 'término'.
-    'término' puede ser texto, comparación o rango.
-  Ej: `switch + #gestionable` (busca 'switch' pero no los que contengan 'gestionable')
-  Ej: `tarjeta + #>8` (busca 'tarjeta' pero no las que tengan número > 8)
 
-Notas:
-- La negación (#) se aplica al final.
-- Los operadores de comparación y rango se aplican al término que les sigue inmediatamente.
-- Las comparaciones y rangos intentan convertir el texto de las celdas a número.
-- La búsqueda es insensible a mayúsculas/minúsculas y acentos.
+- Operadores Lógicos:
+  * `término1 + término2`: Busca filas que contengan AMBOS términos (AND).
+    Ej: `tarjeta + 16 puertos`
+  * `término1 | término2`: Busca filas que contengan AL MENOS UNO de los términos (OR).
+    Ej: `modulo | SFP`
+  * `término1 / término2`: Alternativa para OR.
+    Ej: `switch / conmutador`
+
+- Comparaciones numéricas (aplican a columnas configuradas si son numéricas):
+  * `>numero`: Mayor que. Ej: `>1000`
+  * `<numero`: Menor que. Ej: `<50`
+  * `>=numero` o `≥numero`: Mayor o igual que. Ej: `>=48`
+  * `<=numero` o `≤numero`: Menor o igual que. Ej: `<=10.5`
+
+- Rangos numéricos (ambos incluidos):
+  * `num1-num2`: Entre num1 y num2. Ej: `10-20` (buscará 10, 11, ..., 20)
+  * El número antes del guión debe ser un dígito
+
+- Negación (excluir filas):
+  * `#término`: Excluye filas que coincidan con 'término'.
+    'término' puede ser texto, comparación o rango.
+    Ej: `switch + #gestionable` (busca 'switch' pero no los que contengan 'gestionable')
+    Ej: `tarjeta + #>8` (busca 'tarjeta' pero no las que tengan número > 8)
+
+Restricciones y Reglas:
+---------------------
+1. No se permiten operadores duplicados (ej: `++`, `||`)
+2. La negación (#) solo se puede usar al inicio de un término
+3. Los operadores de comparación (> < >= <=) no se pueden combinar en un mismo término
+4. El operador de rango (-) requiere un número antes del guión
+5. Los operadores lógicos (+ | /) requieren un término antes y después
+6. No se permiten espacios entre operadores y números (ej: `> 10` es inválido)
+
+Notas sobre la Negación:
+----------------------
+- La negación (#) debe colocarse al inicio del término que se desea excluir
+- Se aplica después de evaluar las condiciones positivas
+- Si un término negado coincide en cualquier columna configurada, se excluye la fila
+- Se puede combinar con otros operadores: `término1 + #término2 | #término3`
 
 Búsqueda Directa (si el término no está en diccionario):
 ------------------------------------------------------
@@ -548,6 +592,11 @@ Se busca directamente en las descripciones:
 - `texto`: Busca el texto.
 - `t1 + t2`: Busca descripciones con AMBOS términos.
 - `t1 | t2` o `t1 / t2`: Busca descripciones con AL MENOS UNO.
+
+Notas:
+- La búsqueda es insensible a mayúsculas/minúsculas y acentos
+- Los términos se buscan como palabras completas (no subcadenas)
+- Se ignoran espacios extra entre términos
 """
         messagebox.showinfo("Ayuda - Sintaxis de Búsqueda", ayuda)
 
@@ -803,14 +852,13 @@ Se busca directamente en las descripciones:
     def _procesar_busqueda_via_diccionario(self, termino_original: str, terminos_analizados: List[Dict[str, Any]], op_principal: str,
                                            df_dic_original: pd.DataFrame, df_desc_original: pd.DataFrame,
                                            cols_nombres_dic: List[str]) -> bool:
-        # (Sin cambios)
         mascara_diccionario = self.motor._aplicar_mascara_diccionario(df_dic_original, cols_nombres_dic, terminos_analizados, op_principal)
         if mascara_diccionario.any():
             self.df_candidato_diccionario = df_dic_original[mascara_diccionario].copy()
             logging.info(f"'{termino_original}' encontró {len(self.df_candidato_diccionario)} FCD.")
             terminos_extraidos = self.motor._extraer_terminos_diccionario(self.df_candidato_diccionario, cols_nombres_dic)
             if terminos_extraidos:
-                resultados_en_desc = self.motor._buscar_terminos_en_descripciones(df_desc_original, terminos_extraidos, require_all=False) # OR por defecto
+                resultados_en_desc = self.motor._buscar_terminos_en_descripciones(df_desc_original, terminos_extraidos, require_all=False)
                 self.df_candidato_descripcion = resultados_en_desc.copy() if resultados_en_desc is not None else pd.DataFrame(columns=df_desc_original.columns)
                 self.resultados_actuales = self.df_candidato_descripcion 
                 if self.df_candidato_descripcion is not None and not self.df_candidato_descripcion.empty:
@@ -819,19 +867,30 @@ Se busca directamente en las descripciones:
                 else:
                     self.origen_principal_resultados = OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC
                     self._actualizar_estado(f"'{termino_original}': {len(self.df_candidato_diccionario)} en Dic, 0 resultados en Desc.")
-                    if self.origen_principal_resultados == OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC: # Solo mostrar si realmente no hay RFD
-                         messagebox.showinfo("Info", f"Se encontraron {len(self.df_candidato_diccionario)} filas en Diccionario para '{termino_original}', pero no produjeron resultados en Descripciones.")
-            else: # No se extrajeron términos válidos del FCD
+                    if self.origen_principal_resultados == OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC:
+                         messagebox.showinfo("Información", 
+                            f"Se encontraron {len(self.df_candidato_diccionario)} filas en el Diccionario para '{termino_original}', "
+                            f"pero no se encontraron coincidencias en las Descripciones.\n\n"
+                            f"Esto puede ocurrir porque:\n"
+                            f"- Los términos extraídos no coinciden exactamente en las descripciones\n"
+                            f"- Las descripciones no contienen los términos buscados\n"
+                            f"- Los términos están en un formato diferente en las descripciones")
+            else:
                 self.origen_principal_resultados = OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS
-                self.df_candidato_descripcion = pd.DataFrame(columns=df_desc_original.columns) # DataFrame vacío
+                self.df_candidato_descripcion = pd.DataFrame(columns=df_desc_original.columns)
                 self.resultados_actuales = self.df_candidato_descripcion
                 self._actualizar_estado(f"'{termino_original}': {len(self.df_candidato_diccionario)} en Dic, sin términos válidos para buscar en Desc.")
-                messagebox.showinfo("Info", f"Se encontraron {len(self.df_candidato_diccionario)} filas en Diccionario para '{termino_original}', pero no se pudieron extraer términos válidos.")
-            return True # Se encontraron FCD, independientemente de si hubo RFD o términos
-        return False # No se encontraron FCD
+                messagebox.showinfo("Información", 
+                    f"Se encontraron {len(self.df_candidato_diccionario)} filas en el Diccionario para '{termino_original}', "
+                    f"pero no se pudieron extraer términos válidos para buscar en las Descripciones.\n\n"
+                    f"Esto puede ocurrir porque:\n"
+                    f"- Las columnas configuradas están vacías\n"
+                    f"- Los valores en las columnas no son texto válido\n"
+                    f"- Los términos contienen solo espacios o caracteres no válidos")
+            return True
+        return False
 
     def _procesar_busqueda_directa_descripcion(self, termino_original: str, df_desc_original: pd.DataFrame):
-        # (Sin cambios)
         self.ultimo_termino_buscado = f"{termino_original} (Directo)" 
         self._actualizar_estado(f"Buscando '{termino_original}' (Directo) en descripciones...")
         res_directos = self.motor.buscar_en_descripciones_directo(termino_original)
@@ -840,15 +899,17 @@ Se busca directamente en las descripciones:
         self.origen_principal_resultados = OrigenResultados.DIRECTO_DESCRIPCION
         num_rdd = len(self.df_candidato_descripcion) if self.df_candidato_descripcion is not None else 0
         self._actualizar_estado(f"Búsqueda directa '{termino_original}': {num_rdd} resultados.")
-        if num_rdd == 0: # Solo si la búsqueda directa no produce resultados
-            messagebox.showinfo("Info", f"No se encontraron resultados para '{termino_original}' en la búsqueda directa.")
-            
+        if num_rdd == 0:
+            messagebox.showinfo("Información", f"No se encontraron resultados para '{termino_original}' en la búsqueda directa.")
+
     def _ejecutar_busqueda(self):
         if self.motor.datos_diccionario is None or self.motor.datos_descripcion is None:
-            messagebox.showwarning("Faltan Archivos", "Cargue Diccionario y Descripciones antes de buscar.")
+            messagebox.showwarning("Archivos Faltantes", 
+                "Por favor, cargue el Diccionario y las Descripciones antes de realizar una búsqueda.\n\n"
+                "El Diccionario contiene los términos de referencia y las Descripciones son los datos donde se buscará.")
             return
 
-        termino = self.texto_busqueda_var.get() # Usar StringVar
+        termino = self.texto_busqueda_var.get()
         self.ultimo_termino_buscado = termino 
 
         # Reseteos
@@ -858,12 +919,12 @@ Se busca directamente en las descripciones:
         self.df_candidato_descripcion = None
         self.origen_principal_resultados = OrigenResultados.NINGUNO
 
-        if not termino.strip(): # Búsqueda vacía
+        if not termino.strip():
             logging.info("Búsqueda vacía. Mostrando todas las descripciones.")
             df_desc_all = self.motor.datos_descripcion
             self._actualizar_tabla(self.tabla_resultados, df_desc_all)
             self.resultados_actuales = df_desc_all.copy() if df_desc_all is not None else None
-            self.df_candidato_descripcion = self.resultados_actuales # Para salvar regla
+            self.df_candidato_descripcion = self.resultados_actuales
             self.origen_principal_resultados = OrigenResultados.DIRECTO_DESCRIPCION_VACIA
             num_filas = len(df_desc_all) if df_desc_all is not None else 0
             self._actualizar_estado(f"Mostrando todas las {num_filas} descripciones.")
@@ -875,54 +936,74 @@ Se busca directamente en las descripciones:
         df_desc_original = self.motor.datos_descripcion.copy()
         
         cols_nombres_dic = self.motor._obtener_nombres_columnas_busqueda(df_dic_original)
-        if cols_nombres_dic is None: # Ya muestra messagebox internamente
+        if cols_nombres_dic is None:
             self._actualizar_estado("Error: Configuración de columnas del diccionario inválida.")
-            self._actualizar_botones_estado_general(); return
+            self._actualizar_botones_estado_general()
+            return
 
         op_principal_busqueda, terminos_brutos_busqueda = self._parsear_termino_busqueda_inicial(termino)
 
-        if not terminos_brutos_busqueda: # Si el parseo no devuelve términos (ej. solo '+')
-            messagebox.showwarning("Término Inválido", "El término de búsqueda está vacío o no es válido.")
-            self._actualizar_estado("Término de búsqueda inválido."); self._actualizar_botones_estado_general(); return
+        if not terminos_brutos_busqueda:
+            messagebox.showwarning("Término Inválido", 
+                "El término de búsqueda está vacío o no es válido.\n\n"
+                "Recuerde que:\n"
+                "- No se permiten operadores duplicados (++, ||)\n"
+                "- Los operadores lógicos (+ | /) requieren términos antes y después\n"
+                "- La negación (#) debe ir al inicio del término\n"
+                "- Los operadores de comparación no se pueden combinar en un mismo término")
+            self._actualizar_estado("Término de búsqueda inválido.")
+            self._actualizar_botones_estado_general()
+            return
 
         terminos_analizados = self.motor._analizar_terminos(terminos_brutos_busqueda)
-        if not terminos_analizados: # Si _analizar_terminos no puede procesar nada
-            messagebox.showwarning("Inválido", f"No se pudieron analizar los términos en '{termino}'.")
-            self._actualizar_estado(f"Análisis de '{termino}' fallido."); self._actualizar_botones_estado_general(); return
+        if not terminos_analizados:
+            messagebox.showwarning("Término Inválido", 
+                f"No se pudieron analizar los términos en '{termino}'.\n\n"
+                f"Verifique que:\n"
+                f"- Los operadores están correctamente formateados\n"
+                f"- Los números en comparaciones y rangos son válidos\n"
+                f"- No hay espacios entre operadores y números")
+            self._actualizar_estado(f"Análisis de '{termino}' fallido.")
+            self._actualizar_botones_estado_general()
+            return
 
         # Intenta búsqueda vía diccionario
         fcd_encontrados = self._procesar_busqueda_via_diccionario(termino, terminos_analizados, op_principal_busqueda, 
                                                                 df_dic_original, df_desc_original, cols_nombres_dic)
-        self._actualizar_tabla(self.tabla_resultados, self.resultados_actuales) # Mostrar RFD o tabla vacía
+        self._actualizar_tabla(self.tabla_resultados, self.resultados_actuales)
 
-        if not fcd_encontrados: # No hubo FCD (o fueron todos negados), preguntar por búsqueda directa
+        if not fcd_encontrados:
             logging.info(f"'{termino}' no encontrado/negado en el Diccionario.")
             self._actualizar_estado(f"'{termino}' no encontrado/negado en Diccionario.")
-            # Restaurar vista previa del diccionario, ya que la búsqueda en diccionario falló o no dio resultados
             logging.info("Restaurando vista previa del diccionario.")
             df_dic_preview = self.motor.datos_diccionario
             if df_dic_preview is not None:
                 cols_preview = self.motor._obtener_nombres_columnas_busqueda(df_dic_preview)
                 self._actualizar_tabla(self.tabla_diccionario, df_dic_preview, limite_filas=100, columnas_a_mostrar=cols_preview)
 
-            if messagebox.askyesno("Término no en Diccionario", f"'{termino}' no se encontró en Diccionario.\n\n¿Buscar directamente en Descripciones?"):
+            if messagebox.askyesno("Término no en Diccionario", 
+                f"'{termino}' no se encontró en el Diccionario.\n\n"
+                f"¿Desea buscar directamente en las Descripciones?\n\n"
+                f"Nota: La búsqueda directa:\n"
+                f"- Busca el término exacto en todas las columnas\n"
+                f"- Es insensible a mayúsculas/minúsculas\n"
+                f"- Busca palabras completas, no subcadenas"):
                 self._procesar_busqueda_directa_descripcion(termino, df_desc_original)
-                self._actualizar_tabla(self.tabla_resultados, self.resultados_actuales) # Mostrar RDD
-            else: # Usuario no quiere búsqueda directa
+                self._actualizar_tabla(self.tabla_resultados, self.resultados_actuales)
+            else:
                 self._actualizar_estado(f"Búsqueda de '{termino}' cancelada.")
                 self.origen_principal_resultados = OrigenResultados.NINGUNO
-                self._actualizar_tabla(self.tabla_resultados, None) # Asegurar tabla resultados vacía
+                self._actualizar_tabla(self.tabla_resultados, None)
                 self.resultados_actuales = None
-                self.df_candidato_descripcion = None; self.df_candidato_diccionario = None
+                self.df_candidato_descripcion = None
+                self.df_candidato_diccionario = None
         
         self._actualizar_botones_estado_general()
         
-        # Ejecutar demo extractor
         if self.resultados_actuales is not None and not self.resultados_actuales.empty:
             origen_nombre = self.origen_principal_resultados.name if self.origen_principal_resultados != OrigenResultados.NINGUNO else "DESCONOCIDO"
             self._demo_extractor(self.resultados_actuales, origen_nombre)
 
-        # Enfocar en preview si aplica
         if self.origen_principal_resultados.es_via_diccionario and \
            self.motor.datos_diccionario is not None and not self.motor.datos_diccionario.empty:
             self._buscar_y_enfocar_en_preview()
