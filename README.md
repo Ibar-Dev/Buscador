@@ -1,114 +1,80 @@
-# 🔍 Buscador Avanzado - Herramienta de Búsqueda y Análisis de Datos
+```markdown
+# Buscador Avanzado (v0.5.8)
 
-Una aplicación GUI para realizar búsquedas avanzadas en archivos Excel, diseñada para facilitar el análisis de datos técnicos, inventarios o descripciones complejas.
+![Python](https://img.shields.io/badge/Python-3.7%2B-blue)
+![License](https://img.shields.io/badge/License-MIT-green)
 
+Una aplicación de búsqueda avanzada que permite buscar términos en archivos Excel (diccionarios y descripciones) con soporte para operadores lógicos, comparaciones numéricas y exportación de resultados.
 
----
+## Características Principales
 
-## 🚀 Características Principales
+- **Búsqueda en Diccionarios y Descripciones**: Carga archivos Excel separados para términos de referencia (diccionario) y datos a buscar (descripciones).
+- **Operadores Avanzados**:
+  - Lógicos: `+` (AND), `|` o `/` (OR)
+  - Comparaciones: `>`, `<`, `>=`, `<=`
+  - Rangos: `num1-num2`
+  - Negación: `#término`
+- **Exportación de Resultados**: Guarda reglas de búsqueda y resultados en archivos Excel.
+- **Interfaz Gráfica Intuitiva**: Desarrollada con Tkinter.
 
-- **Carga de archivos Excel**:
-  - **Diccionario**: Define términos clave, especificaciones o condiciones.
-  - **Descripciones**: Contiene datos a analizar (ej.: productos, componentes).
+## Requisitos
 
-- **Sintaxis de búsqueda avanzada**:
-  - Operadores lógicos: `+` (AND), `|` o `/` (OR), `#` (NOT).
-  - Comparaciones numéricas: `>100`, `<=50`, `>=24.5`.
-  - Rangos: `10-20`, `5.5-15.3`.
-  - Búsqueda directa en descripciones.
-
-- **Exportación flexible**:
-  - Formatos soportados: Excel (`.xlsx`, `.xls`), CSV (UTF-8).
-  - Nombres de archivo automáticos basados en la búsqueda.
-
-- **Interfaz intuitiva**:
-  - Vista previa de datos.
-  - Colores alternos en filas.
-  - Ordenación por columnas.
-
-- **Compatibilidad**:
-  - Soporte para Excel moderno (`.xlsx`) y legacy (`.xls`).
-  - Multiplataforma (Windows, Linux, macOS).
-
----
-
-## 📦 Requisitos Previos
-
-- Python 3.6 o superior
+- Python 3.7+
 - Dependencias:
-  ```bash
-  pip install pandas openpyxl xlwt
-  ```
+  - `pandas`
+  - `openpyxl` (para archivos .xlsx)
+  - `tkinter` (normalmente incluido en Python)
 
----
-
-## 🛠 Instalación y Uso
-
-1. **Clonar repositorio** (o descargar el script):
-   ```bash
-   git clone https://github.com/tu-usuario/buscador-avanzado.git
-   cd buscador-avanzado
-   ```
-
-2. **Ejecutar la aplicación**:
-   ```bash
-   python Buscador_v0_4_8.py
-   ```
-
-3. **Pasos básicos**:
-   - Cargar **Diccionario** y **Descripciones** desde archivos Excel.
-   - Ingresar términos de búsqueda con sintaxis avanzada (ej: `switch + #gestionable`).
-   - Exportar resultados con un clic.
-
----
-
-## 📖 Ejemplos de Uso
-
-| Búsqueda                 | Descripción                                  |
-|--------------------------|---------------------------------------------|
-| `router + cisco`         | Filas con "router" Y "cisco" en diccionario |
-| `>1000`                  | Valores numéricos mayores a 1000            |
-| `#gestionable`           | Excluye términos con "gestionable"          |
-| `10-20 | 5-8`         | Rangos numéricos o valores específicos      |
-| `"tarjeta red"`          | Búsqueda exacta en descripciones            |
-
----
-
-## 🛠️ Estructura del Proyecto
-
-```
-buscador-avanzado/
-├── Buscador_v0_4_8.py    # Código principal
-├── config_buscador.json  # Configuración guardada
-├── buscador_app.log      # Registro de actividad
-└── README.md             # Este archivo
+Instalar dependencias:
+```bash
+pip install pandas openpyxl
 ```
 
+## Uso
+
+1. **Cargar Archivos**:
+   - **Diccionario**: Archivo Excel con términos de referencia.
+   - **Descripciones**: Archivo Excel con datos donde buscar.
+
+2. **Realizar Búsquedas**:
+   - Escriba términos en el campo de búsqueda.
+   - Use operadores para refinar la búsqueda (ver Ayuda en la aplicación).
+
+3. **Exportar Resultados**:
+   - Guarde reglas de búsqueda con "Salvar Regla".
+   - Exporte todas las reglas guardadas con "Exportar".
+
+### Ejemplos de Búsqueda
+
+- `router + cisco`: Busca descripciones que contengan ambos términos.
+- `>1000w`: Busca valores mayores a 1000 con unidad "w".
+- `10-20 puertos`: Busca rangos numéricos entre 10 y 20 seguidos de "puertos".
+- `switch + #gestionable`: Busca "switch" pero excluye "gestionable".
+
+## Configuración
+
+La aplicación guarda automáticamente:
+- Últimas rutas de archivos cargados.
+- Índices de columnas para búsqueda en diccionario.
+
+## Capturas de Pantalla
+
+*(Incluir imágenes de la interfaz si es posible)*
+
+## Licencia
+
+MIT License. Ver archivo [LICENSE](LICENSE) para más detalles.
+
+## Notas de Versión (v0.5.8)
+
+- Mejoras en la validación de operadores.
+- Soporte para unidades en comparaciones numéricas (ej: `>1000w`).
+- Optimización del rendimiento en búsquedas grandes.
+
+## Contribuciones
+
+¡Las contribuciones son bienvenidas! Abra un issue o envíe un pull request.
+
 ---
-
-## 📜 Licencia
-
-Distribuido bajo la licencia MIT. Ver `LICENSE` para más detalles.
-
----
-
-## 🤝 Contribuir
-
-¡Contribuciones son bienvenidas! Abre un *issue* para reportar errores o un *pull request* para mejoras.
-
----
-
-**Hecho con ❤️ por Ibar-Dev**  
-*¿Preguntas?* ✉️ **IbarVivas@gmail.com**
+> **Nota**: Para ayuda detallada sobre operadores, use el botón `?` en la aplicación.
 ``` 
-
-Este README incluye:
-- Descripción clara del propósito.
-- Características destacadas con emojis.
-- Requisitos e instalación.
-- Ejemplos prácticos.
-- Estructura de archivos.
-- Licencia y sección de contribución.
-- Diseño responsive y elementos visuales (placeholders para imágenes).
-
-Personaliza los enlaces, nombres y datos de contacto según tu proyecto.
