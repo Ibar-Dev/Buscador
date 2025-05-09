@@ -11,7 +11,7 @@ import unicodedata
 import logging
 import json
 import os
-import string 
+import string # Para sanitizar nombres de archivo
 
 # --- Configuración del Logging ---
 # (Se configura en el bloque __main__)
@@ -452,42 +452,12 @@ class InterfazGrafica(tk.Tk):
     # >>> INICIO: Definición del callback _on_texto_busqueda_change <<<
     def _on_texto_busqueda_change(self, var_name: str, index: str, mode: str):
         """Callback que se ejecuta cuando el contenido de texto_busqueda_var cambia."""
-        # Actualizar estado de botones operadores
+        # var_name, index, mode son argumentos requeridos por trace_add, pero no los usamos directamente aquí.
         self._actualizar_estado_botones_operadores()
-        
-        # Obtener el texto actual y verificar si está vacío
-        texto_actual = self.texto_busqueda_var.get().strip()
-        
-        # Si el texto está vacío y tenemos los archivos cargados, mostrar todas las descripciones
-        if not texto_actual and self.motor.datos_diccionario is not None and self.motor.datos_descripcion is not None:
-            # Resetear resultados previos
-            self.resultados_actuales = None
-            self.df_candidato_diccionario = None
-            self.df_candidato_descripcion = None
-            self.origen_principal_resultados = OrigenResultados.NINGUNO
-            
-            # Mostrar todas las descripciones
-            df_desc_all = self.motor.datos_descripcion
-            self._actualizar_tabla(self.tabla_resultados, df_desc_all)
-            self.resultados_actuales = df_desc_all.copy() if df_desc_all is not None else None
-            self.df_candidato_descripcion = self.resultados_actuales
-            self.origen_principal_resultados = OrigenResultados.DIRECTO_DESCRIPCION_VACIA
-            
-            # Mostrar vista previa del diccionario
-            df_dic_preview = self.motor.datos_diccionario
-            if df_dic_preview is not None:
-                cols_preview = self.motor._obtener_nombres_columnas_busqueda(df_dic_preview)
-                self._actualizar_tabla(self.tabla_diccionario, df_dic_preview, limite_filas=100, columnas_a_mostrar=cols_preview)
-            
-            num_filas = len(df_desc_all) if df_desc_all is not None else 0
-            self._actualizar_estado(f"Mostrando todas las {num_filas} descripciones.")
-            self._actualizar_botones_estado_general()
-        # Si hay texto y los archivos están cargados, ejecutar la búsqueda automáticamente
-        elif texto_actual and self.motor.datos_diccionario is not None and self.motor.datos_descripcion is not None:
-            # Usar after para evitar múltiples búsquedas mientras el usuario escribe
-            if hasattr(self, '_busqueda_pendiente'):
-                self.after_cancel(self._busqueda_pendiente)
-            self._busqueda_pendiente = self.after(500, self._ejecutar_busqueda)  # Esperar 500ms antes de buscar
+        # NOTA: La validación de "++" o "||" con cambio de color no se incluye aquí
+        # ya que la lógica de _insertar_operador_validado y _actualizar_estado_botones_operadores
+        # ya previenen que se formen estos duplicados mediante los botones.
+    # <<< FIN: Definición del callback _on_texto_busqueda_change <<<
 
     def _cargar_configuracion(self) -> Dict:
         # (Sin cambios)
@@ -540,21 +510,27 @@ class InterfazGrafica(tk.Tk):
         self.lbl_desc_cargado = ttk.Label(self.marco_controles, text="Desc: Ninguno", width=20, anchor=tk.W, relief=tk.SUNKEN, borderwidth=1)
 
         self.frame_ops = ttk.Frame(self.marco_controles)
+        # >>> INICIO: Botones de operadores llaman a _insertar_operador_validado <<<
         self.btn_and = ttk.Button(self.frame_ops, text="+", width=3, command=lambda: self._insertar_operador_validado("+"))
         self.btn_or = ttk.Button(self.frame_ops, text="|", width=3, command=lambda: self._insertar_operador_validado("|"))
         self.btn_not = ttk.Button(self.frame_ops, text="#", width=3, command=lambda: self._insertar_operador_validado("#"))
         self.btn_gt = ttk.Button(self.frame_ops, text=">", width=3, command=lambda: self._insertar_operador_validado(">"))
         self.btn_lt = ttk.Button(self.frame_ops, text="<", width=3, command=lambda: self._insertar_operador_validado("<"))
-        self.btn_ge = ttk.Button(self.frame_ops, text="≥", width=3, command=lambda: self._insertar_operador_validado(">="))
-        self.btn_le = ttk.Button(self.frame_ops, text="≤", width=3, command=lambda: self._insertar_operador_validado("<="))
+        self.btn_ge = ttk.Button(self.frame_ops, text="≥", width=3, command=lambda: self._insertar_operador_validado(">=")) # o ">="
+        self.btn_le = ttk.Button(self.frame_ops, text="≤", width=3, command=lambda: self._insertar_operador_validado("<=")) # o "<="
         self.btn_range = ttk.Button(self.frame_ops, text="-", width=3, command=lambda: self._insertar_operador_validado("-"))
+        # <<< FIN: Botones de operadores llaman a _insertar_operador_validado <<<
 
         self.btn_and.grid(row=0, column=0, padx=1); self.btn_or.grid(row=0, column=1, padx=1)
         self.btn_not.grid(row=0, column=2, padx=1); self.btn_gt.grid(row=0, column=3, padx=1)
         self.btn_lt.grid(row=0, column=4, padx=1); self.btn_ge.grid(row=0, column=5, padx=1)
         self.btn_le.grid(row=0, column=6, padx=1); self.btn_range.grid(row=0, column=7, padx=1)
 
+        # >>> INICIO: Usar textvariable en la entrada <<<
         self.entrada_busqueda = ttk.Entry(self.marco_controles, width=50, textvariable=self.texto_busqueda_var)
+        # <<< FIN: Usar textvariable en la entrada <<<
+        
+        self.btn_buscar = ttk.Button(self.marco_controles, text="Buscar", command=self._ejecutar_busqueda)
         self.btn_salvar_regla = ttk.Button(self.marco_controles, text="Salvar Regla", command=self._salvar_regla_actual)
         self.btn_ayuda = ttk.Button(self.marco_controles, text="?", command=self._mostrar_ayuda, width=3)
         self.btn_exportar = ttk.Button(self.marco_controles, text="Exportar", command=self._exportar_resultados)
@@ -578,6 +554,7 @@ class InterfazGrafica(tk.Tk):
 
 
     def _configurar_grid(self):
+        # (Sin cambios respecto a la versión anterior del script)
         self.grid_rowconfigure(2, weight=1); self.grid_rowconfigure(4, weight=3)
         self.grid_columnconfigure(0, weight=1)
         self.marco_controles.grid(row=0, column=0, sticky="new", padx=10, pady=(10, 5))
@@ -591,7 +568,8 @@ class InterfazGrafica(tk.Tk):
 
         self.frame_ops.grid(row=1, column=0, columnspan=6, padx=5, pady=(5,0), sticky="w")
 
-        self.entrada_busqueda.grid(row=2, column=0, columnspan=3, padx=5, pady=(0,5), sticky="ew")
+        self.entrada_busqueda.grid(row=2, column=0, columnspan=2, padx=5, pady=(0,5), sticky="ew")
+        self.btn_buscar.grid(row=2, column=2, padx=(2,0), pady=(0,5), sticky="w")
         self.btn_salvar_regla.grid(row=2, column=3, padx=(2,0), pady=(0,5), sticky="w")
         self.btn_ayuda.grid(row=2, column=4, padx=(2,0), pady=(0,5), sticky="w")
         self.btn_exportar.grid(row=2, column=5, padx=(10, 5), pady=(0,5), sticky="e")
@@ -610,6 +588,8 @@ class InterfazGrafica(tk.Tk):
         self.barra_estado.grid(row=5, column=0, sticky="sew", padx=0, pady=(5, 0))
 
     def _configurar_eventos(self):
+        # (Sin cambios)
+        self.entrada_busqueda.bind("<Return>", lambda event: self._ejecutar_busqueda())
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def _actualizar_estado(self, mensaje: str):
@@ -826,6 +806,7 @@ Notas:
 
         # Estado de otros botones
         self.btn_cargar_descripciones['state'] = 'normal' if dic_cargado else 'disabled'
+        self.btn_buscar['state'] = 'normal' if dic_cargado and desc_cargado else 'disabled'
         
         # Lógica botón Salvar Regla
         puede_salvar_fcd = self.df_candidato_diccionario is not None and not self.df_candidato_diccionario.empty
@@ -950,192 +931,177 @@ Notas:
             logging.info(f"Término '{termino_buscar}' no encontrado en vista previa del diccionario.")
 
 
-    def _parsear_termino_busqueda_inicial(self, termino_raw: str) -> Tuple[str, List[Dict[str, Any]]]:
-        """
-        Parsea el término de búsqueda inicial y retorna el término original y los términos analizados.
-        
-        Args:
-            termino_raw (str): El término de búsqueda en bruto.
-            
-        Returns:
-            Tuple[str, List[Dict[str, Any]]]: Una tupla con:
-                - El término original
-                - Lista de términos analizados con sus operadores y valores
-                
-        Raises:
-            ValueError: Si el término no puede ser parseado correctamente.
-        """
-        if not isinstance(termino_raw, str):
-            raise ValueError("El término de búsqueda debe ser una cadena de texto")
-            
+    def _parsear_termino_busqueda_inicial(self, termino_raw: str) -> Tuple[str, List[str]]:
+        # (Sin cambios)
         termino_limpio = termino_raw.strip()
-        if not termino_limpio:
-            return termino_raw, []
-            
-        try:
-            # Determinar el operador principal y separar los términos
-            op_principal = 'OR'
-            terminos_brutos = []
-            
-            if '+' in termino_limpio:
-                op_principal = 'AND'
-                terminos_brutos = [p.strip() for p in termino_limpio.split('+') if p.strip()]
-            elif '|' in termino_limpio:
-                op_principal = 'OR'
-                terminos_brutos = [p.strip() for p in termino_limpio.split('|') if p.strip()]
-            elif '/' in termino_limpio:
-                op_principal = 'OR'
-                terminos_brutos = [p.strip() for p in termino_limpio.split('/') if p.strip()]
-            else:
-                terminos_brutos = [termino_limpio]
-                
-            if not terminos_brutos:
-                logging.warning(f"Término '{termino_raw}' vacío tras parseo.")
-                return termino_raw, []
-                
-            # Analizar cada término
-            terminos_analizados = []
-            for term in terminos_brutos:
-                term_analizado = {'operador': op_principal, 'valor': term}
-                terminos_analizados.append(term_analizado)
-                
-            return termino_raw, terminos_analizados
-            
-        except Exception as e:
-            logging.error(f"Error parseando término '{termino_raw}': {str(e)}")
-            raise ValueError(f"No se pudo parsear el término de búsqueda: {str(e)}")
-
+        op_principal = 'OR'; terminos_brutos = []
+        if not termino_limpio: return op_principal, []
+        if '+' in termino_limpio: op_principal = 'AND'; terminos_brutos = [p.strip() for p in termino_limpio.split('+') if p.strip()]
+        elif '|' in termino_limpio: op_principal = 'OR'; terminos_brutos = [p.strip() for p in termino_limpio.split('|') if p.strip()]
+        elif '/' in termino_limpio: op_principal = 'OR'; terminos_brutos = [p.strip() for p in termino_limpio.split('/') if p.strip()]
+        else: terminos_brutos = [termino_limpio]
+        if not any(terminos_brutos): logging.warning(f"Término '{termino_raw}' vacío tras parseo."); return 'OR', []
+        return op_principal, terminos_brutos
+    
     def _procesar_busqueda_via_diccionario(self, termino_original: str, terminos_analizados: List[Dict[str, Any]], op_principal: str,
-                                         terminos_brutos: List[str]) -> Tuple[OrigenResultados, pd.DataFrame]:
-        """
-        Procesa la búsqueda utilizando el diccionario como fuente de datos.
-        
-        Args:
-            termino_original (str): El término de búsqueda original.
-            terminos_analizados (List[Dict[str, Any]]): Lista de términos analizados con sus operadores.
-            op_principal (str): Operador principal de la búsqueda ('AND' u 'OR').
-            terminos_brutos (List[str]): Lista de términos en bruto.
-            
-        Returns:
-            Tuple[OrigenResultados, pd.DataFrame]: Una tupla con:
-                - El origen de los resultados
-                - DataFrame con los resultados de la búsqueda
-                
-        Raises:
-            ValueError: Si hay un error en el procesamiento de la búsqueda.
-        """
-        try:
-            if not terminos_analizados:
-                logging.warning("No hay términos para procesar en la búsqueda")
-                return OrigenResultados.DICCIONARIO, pd.DataFrame()
-                
-            # Extraer términos del diccionario
-            terminos_diccionario = self._extraer_terminos_diccionario(terminos_brutos)
-            if not terminos_diccionario:
-                logging.warning("No se encontraron términos en el diccionario")
-                return OrigenResultados.DICCIONARIO, pd.DataFrame()
-                
-            # Buscar términos en las descripciones
-            resultados = self._buscar_terminos_en_descripciones(terminos_diccionario, op_principal)
-            if resultados.empty:
-                logging.info("No se encontraron resultados en las descripciones")
-                return OrigenResultados.DICCIONARIO, pd.DataFrame()
-                
-            # Ordenar resultados
-            resultados_ordenados = self._ordenar_resultados(resultados)
-            
-            return OrigenResultados.DICCIONARIO, resultados_ordenados
-            
-        except Exception as e:
-            logging.error(f"Error procesando búsqueda vía diccionario: {str(e)}")
-            raise ValueError(f"Error en el procesamiento de la búsqueda: {str(e)}")
+                                           df_dic_original: pd.DataFrame, df_desc_original: pd.DataFrame,
+                                           cols_nombres_dic: List[str]) -> bool:
+        mascara_diccionario = self.motor._aplicar_mascara_diccionario(df_dic_original, cols_nombres_dic, terminos_analizados, op_principal)
+        if mascara_diccionario.any():
+            self.df_candidato_diccionario = df_dic_original[mascara_diccionario].copy()
+            logging.info(f"'{termino_original}' encontró {len(self.df_candidato_diccionario)} FCD.")
+            terminos_extraidos = self.motor._extraer_terminos_diccionario(self.df_candidato_diccionario, cols_nombres_dic)
+            if terminos_extraidos:
+                resultados_en_desc = self.motor._buscar_terminos_en_descripciones(df_desc_original, terminos_extraidos, require_all=False)
+                self.df_candidato_descripcion = resultados_en_desc.copy() if resultados_en_desc is not None else pd.DataFrame(columns=df_desc_original.columns)
+                self.resultados_actuales = self.df_candidato_descripcion 
+                if self.df_candidato_descripcion is not None and not self.df_candidato_descripcion.empty:
+                    self.origen_principal_resultados = OrigenResultados.VIA_DICCIONARIO_CON_RESULTADOS_DESC
+                    self._actualizar_estado(f"'{termino_original}': {len(self.df_candidato_diccionario)} en Dic, {len(self.df_candidato_descripcion)} en Desc.")
+                else:
+                    self.origen_principal_resultados = OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC
+                    self._actualizar_estado(f"'{termino_original}': {len(self.df_candidato_diccionario)} en Dic, 0 resultados en Desc.")
+                    if self.origen_principal_resultados == OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC:
+                         messagebox.showinfo("Información", 
+                            f"Se encontraron {len(self.df_candidato_diccionario)} filas en el Diccionario para '{termino_original}', "
+                            f"pero no se encontraron coincidencias en las Descripciones.\n\n"
+                            f"Esto puede ocurrir porque:\n"
+                            f"- Los términos extraídos no coinciden exactamente en las descripciones\n"
+                            f"- Las descripciones no contienen los términos buscados\n"
+                            f"- Los términos están en un formato diferente en las descripciones")
+            else:
+                self.origen_principal_resultados = OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS
+                self.df_candidato_descripcion = pd.DataFrame(columns=df_desc_original.columns)
+                self.resultados_actuales = self.df_candidato_descripcion
+                self._actualizar_estado(f"'{termino_original}': {len(self.df_candidato_diccionario)} en Dic, sin términos válidos para buscar en Desc.")
+                messagebox.showinfo("Información", 
+                    f"Se encontraron {len(self.df_candidato_diccionario)} filas en el Diccionario para '{termino_original}', "
+                    f"pero no se pudieron extraer términos válidos para buscar en las Descripciones.\n\n"
+                    f"Esto puede ocurrir porque:\n"
+                    f"- Las columnas configuradas están vacías\n"
+                    f"- Los valores en las columnas no son texto válido\n"
+                    f"- Los términos contienen solo espacios o caracteres no válidos")
+            return True
+        return False
 
-    def _procesar_busqueda_directa_descripcion(self, termino_original: str, df_desc_original: pd.DataFrame) -> Tuple[OrigenResultados, pd.DataFrame]:
-        """
-        Procesa la búsqueda directamente en las descripciones.
-        
-        Args:
-            termino_original (str): El término de búsqueda original.
-            df_desc_original (pd.DataFrame): DataFrame con las descripciones.
-            
-        Returns:
-            Tuple[OrigenResultados, pd.DataFrame]: Una tupla con:
-                - El origen de los resultados
-                - DataFrame con los resultados de la búsqueda
-                
-        Raises:
-            ValueError: Si hay un error en el procesamiento de la búsqueda.
-        """
-        try:
-            if df_desc_original.empty:
-                logging.warning("No hay descripciones disponibles para buscar")
-                return OrigenResultados.DESCRIPCION, pd.DataFrame()
-                
-            # Aplicar búsqueda directa
-            mascara = self.motor._aplicar_mascara_descripcion(df_desc_original, termino_original)
-            if not mascara.any():
-                logging.info(f"No se encontraron resultados para '{termino_original}' en las descripciones")
-                return OrigenResultados.DESCRIPCION, pd.DataFrame()
-                
-            # Filtrar resultados
-            resultados = df_desc_original[mascara].copy()
-            
-            # Ordenar resultados
-            resultados_ordenados = self._ordenar_resultados(resultados)
-            
-            return OrigenResultados.DESCRIPCION, resultados_ordenados
-            
-        except Exception as e:
-            logging.error(f"Error procesando búsqueda directa en descripciones: {str(e)}")
-            raise ValueError(f"Error en el procesamiento de la búsqueda: {str(e)}")
+    def _procesar_busqueda_directa_descripcion(self, termino_original: str, df_desc_original: pd.DataFrame):
+        self.ultimo_termino_buscado = f"{termino_original} (Directo)" 
+        self._actualizar_estado(f"Buscando '{termino_original}' (Directo) en descripciones...")
+        res_directos = self.motor.buscar_en_descripciones_directo(termino_original)
+        self.df_candidato_descripcion = res_directos.copy() if res_directos is not None else pd.DataFrame(columns=df_desc_original.columns)
+        self.resultados_actuales = self.df_candidato_descripcion
+        self.origen_principal_resultados = OrigenResultados.DIRECTO_DESCRIPCION
+        num_rdd = len(self.df_candidato_descripcion) if self.df_candidato_descripcion is not None else 0
+        self._actualizar_estado(f"Búsqueda directa '{termino_original}': {num_rdd} resultados.")
+        if num_rdd == 0:
+            messagebox.showinfo("Información", f"No se encontraron resultados para '{termino_original}' en la búsqueda directa.")
 
     def _ejecutar_busqueda(self):
-        """Ejecuta la búsqueda actual y actualiza la interfaz."""
         if self.motor.datos_diccionario is None or self.motor.datos_descripcion is None:
             messagebox.showwarning("Archivos Faltantes", 
                 "Por favor, cargue el Diccionario y las Descripciones antes de realizar una búsqueda.\n\n"
                 "El Diccionario contiene los términos de referencia y las Descripciones son los datos donde se buscará.")
             return
 
-        texto_busqueda = self.entrada_busqueda.get().strip()
-        if not texto_busqueda:
+        termino = self.texto_busqueda_var.get()
+        self.ultimo_termino_buscado = termino 
+
+        # Reseteos
+        self.resultados_actuales = None
+        self._actualizar_tabla(self.tabla_resultados, None) 
+        self.df_candidato_diccionario = None
+        self.df_candidato_descripcion = None
+        self.origen_principal_resultados = OrigenResultados.NINGUNO
+
+        if not termino.strip():
+            logging.info("Búsqueda vacía. Mostrando todas las descripciones.")
+            df_desc_all = self.motor.datos_descripcion
+            self._actualizar_tabla(self.tabla_resultados, df_desc_all)
+            self.resultados_actuales = df_desc_all.copy() if df_desc_all is not None else None
+            self.df_candidato_descripcion = self.resultados_actuales
+            self.origen_principal_resultados = OrigenResultados.DIRECTO_DESCRIPCION_VACIA
+            num_filas = len(df_desc_all) if df_desc_all is not None else 0
+            self._actualizar_estado(f"Mostrando todas las {num_filas} descripciones.")
+            self._actualizar_botones_estado_general()
             return
 
-        self._actualizar_estado("Ejecutando búsqueda...")
-        self._deshabilitar_botones_operadores()
+        self._actualizar_estado(f"Buscando '{termino}'...")
+        df_dic_original = self.motor.datos_diccionario.copy()
+        df_desc_original = self.motor.datos_descripcion.copy()
         
-        try:
-            termino_original, terminos_analizados = self._parsear_termino_busqueda_inicial(texto_busqueda)
-            
-            if not terminos_analizados:
-                self._actualizar_estado("No se encontraron términos válidos para buscar")
-                return
-                
-            op_principal = terminos_analizados[0].get('operador', 'AND')
-            
-            if self.motor.datos_diccionario is not None and not self.motor.datos_diccionario.empty:
-                origen, resultados = self._procesar_busqueda_via_diccionario(termino_original, terminos_analizados, op_principal, terminos_analizados)
-            else:
-                origen, resultados = self._procesar_busqueda_directa_descripcion(termino_original, self.motor.datos_descripcion)
-                
-            self.origen_principal_resultados = origen
-            self.resultados_actuales = resultados
-            
-            if not resultados.empty:
-                self._actualizar_tabla(self.tabla_resultados, resultados)
-                if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-                    self._demo_extractor(resultados, origen.name)
-
-            if self.origen_principal_resultados.es_via_diccionario and \
-               self.motor.datos_diccionario is not None and not self.motor.datos_diccionario.empty:
-                self._buscar_y_enfocar_en_preview()
-                
-        except Exception as e:
-            self._actualizar_estado(f"Error en la búsqueda: {str(e)}")
-            logging.error(f"Error en la búsqueda: {str(e)}", exc_info=True)
-        finally:
-            self._actualizar_estado_botones_operadores()
+        cols_nombres_dic = self.motor._obtener_nombres_columnas_busqueda(df_dic_original)
+        if cols_nombres_dic is None:
+            self._actualizar_estado("Error: Configuración de columnas del diccionario inválida.")
             self._actualizar_botones_estado_general()
+            return
+
+        op_principal_busqueda, terminos_brutos_busqueda = self._parsear_termino_busqueda_inicial(termino)
+
+        if not terminos_brutos_busqueda:
+            messagebox.showwarning("Término Inválido", 
+                "El término de búsqueda está vacío o no es válido.\n\n"
+                "Recuerde que:\n"
+                "- No se permiten operadores duplicados (++, ||)\n"
+                "- Los operadores lógicos (+ | /) requieren términos antes y después\n"
+                "- La negación (#) debe ir al inicio del término\n"
+                "- Los operadores de comparación no se pueden combinar en un mismo término")
+            self._actualizar_estado("Término de búsqueda inválido.")
+            self._actualizar_botones_estado_general()
+            return
+
+        terminos_analizados = self.motor._analizar_terminos(terminos_brutos_busqueda)
+        if not terminos_analizados:
+            messagebox.showwarning("Término Inválido", 
+                f"No se pudieron analizar los términos en '{termino}'.\n\n"
+                f"Verifique que:\n"
+                f"- Los operadores están correctamente formateados\n"
+                f"- Los números en comparaciones y rangos son válidos\n"
+                f"- No hay espacios entre operadores y números")
+            self._actualizar_estado(f"Análisis de '{termino}' fallido.")
+            self._actualizar_botones_estado_general()
+            return
+
+        # Intenta búsqueda vía diccionario
+        fcd_encontrados = self._procesar_busqueda_via_diccionario(termino, terminos_analizados, op_principal_busqueda, 
+                                                                df_dic_original, df_desc_original, cols_nombres_dic)
+        self._actualizar_tabla(self.tabla_resultados, self.resultados_actuales)
+
+        if not fcd_encontrados:
+            logging.info(f"'{termino}' no encontrado/negado en el Diccionario.")
+            self._actualizar_estado(f"'{termino}' no encontrado/negado en Diccionario.")
+            logging.info("Restaurando vista previa del diccionario.")
+            df_dic_preview = self.motor.datos_diccionario
+            if df_dic_preview is not None:
+                cols_preview = self.motor._obtener_nombres_columnas_busqueda(df_dic_preview)
+                self._actualizar_tabla(self.tabla_diccionario, df_dic_preview, limite_filas=100, columnas_a_mostrar=cols_preview)
+
+            if messagebox.askyesno("Término no en Diccionario", 
+                f"'{termino}' no se encontró en el Diccionario.\n\n"
+                f"¿Desea buscar directamente en las Descripciones?\n\n"
+                f"Nota: La búsqueda directa:\n"
+                f"- Busca el término exacto en todas las columnas\n"
+                f"- Es insensible a mayúsculas/minúsculas\n"
+                f"- Busca palabras completas, no subcadenas"):
+                self._procesar_busqueda_directa_descripcion(termino, df_desc_original)
+                self._actualizar_tabla(self.tabla_resultados, self.resultados_actuales)
+            else:
+                self._actualizar_estado(f"Búsqueda de '{termino}' cancelada.")
+                self.origen_principal_resultados = OrigenResultados.NINGUNO
+                self._actualizar_tabla(self.tabla_resultados, None)
+                self.resultados_actuales = None
+                self.df_candidato_descripcion = None
+                self.df_candidato_diccionario = None
+        
+        self._actualizar_botones_estado_general()
+        
+        if self.resultados_actuales is not None and not self.resultados_actuales.empty:
+            origen_nombre = self.origen_principal_resultados.name if self.origen_principal_resultados != OrigenResultados.NINGUNO else "DESCONOCIDO"
+            self._demo_extractor(self.resultados_actuales, origen_nombre)
+
+        if self.origen_principal_resultados.es_via_diccionario and \
+           self.motor.datos_diccionario is not None and not self.motor.datos_diccionario.empty:
+            self._buscar_y_enfocar_en_preview()
+
 
     def _demo_extractor(self, df_res: pd.DataFrame, tipo_busqueda: str):
         # (Sin cambios)
@@ -1478,32 +1444,6 @@ Notas:
         
         # Deshabilitar botón de rango
         self.btn_range['state'] = 'disabled'
-
-    def _ordenar_resultados(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Ordena los resultados de la búsqueda.
-        
-        Args:
-            df (pd.DataFrame): DataFrame con los resultados a ordenar.
-            
-        Returns:
-            pd.DataFrame: DataFrame ordenado.
-        """
-        if df is None or df.empty:
-            return df
-            
-        try:
-            # Intentar ordenar por la primera columna numérica si existe
-            cols_numericas = df.select_dtypes(include=['int64', 'float64']).columns
-            if len(cols_numericas) > 0:
-                return df.sort_values(by=cols_numericas[0], ascending=False)
-            
-            # Si no hay columnas numéricas, ordenar por la primera columna
-            return df.sort_values(by=df.columns[0])
-            
-        except Exception as e:
-            logging.warning(f"Error al ordenar resultados: {e}")
-            return df
 
 # --- Bloque Principal (`if __name__ == "__main__":`) ---
 if __name__ == "__main__":
