@@ -1448,4 +1448,4 @@ if __name__ == "__main__":
             logger.error(f"No se pudo mostrar el mensaje de error fatal: {fallback_error}")
             print(f"ERROR FATAL: {main_error}. Consulte {log_file}.")
     finally:
-        logger.info("=== Finalizando Aplicación Buscador (Fusionada) ===")
+        logger.info("=== Finalizando Aplicación Buscador ===")
