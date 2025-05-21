@@ -19,7 +19,7 @@ Aplicación de escritorio con interfaz gráfica (Tkinter) diseñada para realiza
 - [🛠️ Requisitos Previos](#️-requisitos-previos)
 - [⚙️ Instalación](#️-instalación)
 - [🔧 Configuración](#️-configuración)
-  - [Archivo de Configuración](#archivo-de-configuración-config_buscador.json)
+  - [Archivo de Configuración](#archivo-de-configuración-config_buscador_json)
   - [Columnas del Diccionario](#columnas-del-diccionario)
 - [🚀 Ejecución de la Aplicación](#️-ejecución-de-la-aplicación)
 - [🗺️ Guía de Uso](#️-guía-de-uso)
