@@ -1,12 +1,12 @@
-# 📊 Buscador(v0.6.5)
+# 📊 Buscador Avanzado (v0.7.0)
 
 ![Python](https://img.shields.io/badge/Python-3.7%2B-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![GUI](https://img.shields.io/badge/GUI-Tkinter-orange)
 ![Dependencies](https://img.shields.io/badge/dependencies-pandas%20%7C%20openpyxl-brightgreen)
-![Version](https://img.shields.io/badge/version-0.5.8-informational)
+![Version](https://img.shields.io/badge/version-0.6.5-informational)
 
-Aplicación de escritorio con interfaz gráfica (Tkinter) diseñada para realizar búsquedas complejas y estructuradas en archivos Excel. Facilita el cruce de información entre un archivo "Diccionario" de referencia y un archivo "Descripciones" de datos, permitiendo guardar y exportar los resultados y las reglas de búsqueda.
+Aplicación de escritorio con interfaz gráfica (Tkinter) diseñada para realizar búsquedas complejas y estructuradas en archivos Excel. Facilita el cruce de información entre un archivo "Diccionario" de referencia y un archivo "Descripciones" de datos, implementando una lógica de parseo jerárquica para los términos de búsqueda. Permite guardar y exportar los resultados y las reglas de búsqueda.
 
 ---
 
@@ -16,10 +16,11 @@ Aplicación de escritorio con interfaz gráfica (Tkinter) diseñada para realiza
 - [🏗️ Arquitectura del Software](#️-arquitectura-del-software)
   - [Clases Principales](#clases-principales)
   - [Enumeraciones](#enumeraciones)
+  - [Lógica de Parseo de Búsqueda](#lógica-de-parseo-de-búsqueda)
 - [🛠️ Requisitos Previos](#️-requisitos-previos)
 - [⚙️ Instalación](#️-instalación)
 - [🔧 Configuración](#️-configuración)
-  - [Archivo de Configuración](#archivo-de-configuración-config_buscador_json)
+  - [Archivo de Configuración](#archivo-de-configuración-config_buscador_v0_6_5json)
   - [Columnas del Diccionario](#columnas-del-diccionario)
 - [🚀 Ejecución de la Aplicación](#️-ejecución-de-la-aplicación)
 - [🗺️ Guía de Uso](#️-guía-de-uso)
@@ -32,6 +33,7 @@ Aplicación de escritorio con interfaz gráfica (Tkinter) diseñada para realiza
 - [🔍 Sintaxis de Búsqueda](#-sintaxis-de-búsqueda)
 - [📝 Registro de Actividad (Logging)](#-registro-de-actividad-logging)
 - [🖼️ Capturas de Pantalla (Sugerencia)](#️-capturas-de-pantalla-sugerencia)
+- [🧪 Pruebas Unitarias](#-pruebas-unitarias)
 - [📜 Licencia](#-licencia)
 - [🤝 Cómo Contribuir](#-cómo-contribuir)
 
@@ -40,9 +42,13 @@ Aplicación de escritorio con interfaz gráfica (Tkinter) diseñada para realiza
 ## ✨ Características Destacadas
 
 -   **Interfaz Gráfica con Tkinter**: Interfaz de usuario intuitiva para facilitar la interacción, carga de archivos y visualización de datos.
+-   **Parseo Jerárquico de Términos de Búsqueda**:
+    -   Prioriza operadores `OR` (`|`, `/`) sobre operadores `AND` (`+`).
+    -   Permite búsquedas complejas como `terminoA | terminoB + terminoC` interpretada correctamente como `terminoA OR (terminoB AND terminoC)`.
 -   **Búsqueda en Dos Etapas o Directa**:
-    -   Utiliza un archivo "Diccionario" para identificar filas coincidentes (FCDs), extrae términos clave de estas y luego busca dichos términos en un archivo "Descripciones".
-    -   Permite una búsqueda directa en el archivo "Descripciones" si no se encuentran FCDs o si el usuario opta por esta vía.
+    -   Utiliza un archivo "Diccionario" para identificar filas coincidentes (FCDs) aplicando la lógica de parseo jerárquico.
+    -   Extrae términos clave de estos FCDs y luego busca dichos términos (combinados con `OR`) en un archivo "Descripciones".
+    -   Permite una búsqueda directa en el archivo "Descripciones" (aplicando también el parseo jerárquico) si no se encuentran FCDs o si el usuario opta por esta vía.
 -   **Operadores de Búsqueda Avanzados**:
     -   Lógicos: `+` (AND), `|` o `/` (OR).
     -   Comparaciones Numéricas: `>`, `<`, `>=`, `<=` (ej. `>1000`, `<50V`).
@@ -51,16 +57,16 @@ Aplicación de escritorio con interfaz gráfica (Tkinter) diseñada para realiza
     -   Soporte para Unidades: Reconoce y filtra por unidades junto a valores numéricos (ej: `>1000W`, `<=10.5A`).
 -   **Extractor de Magnitudes**: Capacidad para identificar y normalizar unidades de medida predefinidas para comparaciones numéricas precisas.
 -   **Gestión de Reglas de Búsqueda**:
-    -   Permite guardar reglas (término original, términos analizados, operador principal, origen de los datos y los propios datos resultantes).
+    -   Permite guardar reglas (término original, estructura parseada completa, origen de los datos y los propios datos resultantes).
     -   Opción de guardar las coincidencias del diccionario (FCDs) y/o los resultados finales de las descripciones (RFDs) para búsquedas vía diccionario.
-    -   Exporta todas las reglas guardadas a un único archivo Excel, con una hoja de índice y hojas detalladas para la definición y los datos de cada regla.
--   **Configuración Persistente**: Guarda las rutas de los últimos archivos utilizados y la configuración de las columnas de búsqueda del diccionario en `config_buscador.json`.
+    -   Exporta todas las reglas guardadas a un único archivo Excel, con una hoja de índice y hojas detalladas para la definición (incluyendo la estructura parseada) y los datos de cada regla.
+-   **Configuración Persistente**: Guarda las rutas de los últimos archivos utilizados y la configuración de las columnas de búsqueda del diccionario en `config_buscador_v0_6_5.json`.
 -   **Visualización de Datos Mejorada**:
     -   Muestra vistas previas del "Archivo Diccionario" (limitado a 100 filas para rendimiento) y los resultados completos en tablas (`Treeview`).
     -   Permite el ordenamiento dinámico de las columnas en ambas tablas haciendo clic en sus cabeceras.
 -   **Manejo de Errores y Logging**:
     -   Sistema de mensajes informativos y de error al usuario a través de diálogos.
-    -   Registro detallado de operaciones, advertencias y errores en el archivo `buscador_app.log` para facilitar la depuración.
+    -   Registro detallado de operaciones, advertencias y errores en el archivo `buscador_app_v0_6_5.log` para facilitar la depuración.
 -   **Validación Dinámica de Operadores**: La interfaz habilita/deshabilita los botones de inserción de operadores de búsqueda (`+`, `|`, `#`, `>`, etc.) en tiempo real, basándose en la validez y contexto del término de búsqueda que se está escribiendo.
 -   **Ayuda Integrada**: Proporciona una guía de sintaxis accesible mediante un botón de ayuda (`?`).
 
@@ -74,15 +80,23 @@ El script está estructurado modularmente para una mejor organización y manteni
 -   **`InterfazGrafica(tk.Tk)`**: Gestiona todos los aspectos de la interfaz de usuario (ventanas, widgets, eventos), coordina las interacciones y presenta los datos. Es el punto de entrada de la aplicación.
 -   **`MotorBusqueda`**: Contiene toda la lógica central para procesar las búsquedas. Esto incluye:
     -   Carga y validación de los DataFrames de Pandas.
-    -   Parseo y análisis de los términos de búsqueda introducidos por el usuario.
-    -   Generación de máscaras de filtrado para los DataFrames basadas en los términos analizados.
+    -   **Parseo jerárquico de dos niveles** de los términos de búsqueda.
+    -   Análisis de términos atómicos para identificar negaciones, comparaciones, rangos y texto simple.
+    -   Generación de máscaras de filtrado para los DataFrames.
     -   Extracción de términos clave del "Diccionario" para la búsqueda en dos etapas.
     -   Orquestación del flujo de búsqueda (vía diccionario o directa).
--   **`ManejadorExcel`**: Clase de utilidad estática responsable de la carga de archivos Excel (`.xls`, `.xlsx`) utilizando `pandas`, devolviendo el DataFrame y posibles mensajes de error.
--   **`ExtractorMagnitud`**: Utilidad para la normalización y reconocimiento de unidades de medida (magnitudes) presentes en los textos, facilitando las comparaciones numéricas.
+-   **`ManejadorExcel`**: Clase de utilidad estática responsable de la carga de archivos Excel (`.xls`, `.xlsx`) utilizando `pandas`.
+-   **`ExtractorMagnitud`**: Utilidad para la normalización y reconocimiento de unidades de medida.
 
 ### Enumeraciones
--   **`OrigenResultados(Enum)`**: Define y categoriza los diferentes flujos o estados por los cuales se pueden obtener los resultados de una búsqueda (ej., `VIA_DICCIONARIO_CON_RESULTADOS_DESC`, `DIRECTO_DESCRIPCION_VACIA`, `ERROR_CARGA_DICCIONARIO`). Esto es crucial para la lógica interna, el guardado de reglas y la presentación de información al usuario.
+-   **`OrigenResultados(Enum)`**: Define y categoriza los diferentes flujos o estados por los cuales se pueden obtener los resultados de una búsqueda (ej., `VIA_DICCIONARIO_CON_RESULTADOS_DESC`, `DIRECTO_DESCRIPCION_VACIA`, `ERROR_CARGA_DICCIONARIO`, `TERMINO_INVALIDO`).
+
+### Lógica de Parseo de Búsqueda
+El `MotorBusqueda` implementa un sistema de parseo de dos niveles:
+1.  **`_parsear_nivel1_or`**: Divide el término de búsqueda completo en segmentos basados en los operadores `OR` (`|`, `/`), otorgándoles la máxima precedencia.
+2.  **`_parsear_nivel2_and`**: Cada segmento del nivel 1 se procesa para dividirlo por el operador `AND` (`+`). Esta función utiliza una máquina de estados para manejar correctamente las expresiones de magnitud y evitar divisiones incorrectas dentro de números o unidades.
+3.  **`_analizar_terminos`**: Los términos resultantes del parseo de nivel 2 (que son atómicos o expresiones simples de comparación/rango/negación) se analizan para determinar su tipo y valor.
+4.  **Generación de Máscaras**: Se generan máscaras booleanas para los términos analizados y se combinan según la jerarquía de operadores (AND dentro de los segmentos, luego OR entre segmentos).
 
 ---
 
@@ -90,40 +104,35 @@ El script está estructurado modularmente para una mejor organización y manteni
 
 -   **Python 3.7 o superior.**
 -   **pip** (gestor de paquetes de Python).
--   **Librerías de Python** (se instalarán con `requirements.txt`):
+-   **Librerías de Python**:
     -   `pandas`
-    -   `openpyxl` (necesario para que pandas lea y escriba archivos `.xlsx`)
+    -   `openpyxl` (para leer/escribir archivos `.xlsx`)
 -   **Tkinter**:
-    -   Normalmente incluido con las instalaciones estándar de Python en Windows y macOS.
-    -   En algunas distribuciones de Linux, puede requerir una instalación separada. Ejemplo para Debian/Ubuntu:
-        ```bash
-        sudo apt-get update
-        sudo apt-get install python3-tk
-        ```
+    -   Normalmente incluido con Python. En Linux, puede necesitar `sudo apt-get install python3-tk`.
 
 ---
 
 ## ⚙️ Instalación
 
-1.  **Descarga o Clona el Script**:
-    Obtén el archivo Python principal (ej. `buscador_excel_fusionado.py`).
+1.  **Descarga el Script**:
+    Obtén el archivo Python `Buscador_v0_6_5.py`.
 
-2.  **Crea un Entorno Virtual (Altamente Recomendado)**:
-    Navega a la carpeta donde guardaste el script y ejecuta:
+2.  **Entorno Virtual (Recomendado)**:
     ```bash
     python -m venv venv_buscador
+    # Windows:
+    venv_buscador\Scripts\activate
+    # macOS/Linux:
+    source venv_buscador/bin/activate
     ```
-    Activa el entorno:
-    -   Windows: `venv_buscador\Scripts\activate`
-    -   macOS/Linux: `source venv_buscador/bin/activate`
 
-3.  **Instala las Dependencias**:
-    Crea un archivo llamado `requirements.txt` en el mismo directorio del script con el siguiente contenido:
+3.  **Instala Dependencias**:
+    Crea `requirements.txt`:
     ```text
     pandas
     openpyxl
     ```
-    Luego, instala las dependencias ejecutando:
+    Instala:
     ```bash
     pip install -r requirements.txt
     ```
@@ -132,24 +141,21 @@ El script está estructurado modularmente para una mejor organización y manteni
 
 ## 🔧 Configuración
 
-### Archivo de Configuración (`config_buscador.json`)
-La aplicación crea y utiliza automáticamente un archivo llamado `config_buscador.json` en el mismo directorio donde se ejecuta. Este archivo almacena:
--   `last_dic_path`: Ruta al último "Archivo Diccionario" cargado con éxito.
--   `last_desc_path`: Ruta al último "Archivo de Descripciones" cargado con éxito.
--   `indices_columnas_busqueda_dic`: Lista de índices de las columnas a utilizar del "Archivo Diccionario".
-
-Este archivo se actualiza al cargar archivos o al cerrar la aplicación.
+### Archivo de Configuración (`config_buscador_v0_6_5.json`)
+La aplicación crea y utiliza `config_buscador_v0_6_5.json` para almacenar:
+-   `last_dic_path`: Ruta al último "Archivo Diccionario".
+-   `last_desc_path`: Ruta al último "Archivo de Descripciones".
+-   `indices_columnas_busqueda_dic`: Lista de índices de columnas a usar del "Diccionario".
 
 ### Columnas del Diccionario
-La clave `indices_columnas_busqueda_dic` en el archivo de configuración determina en qué columnas del "Archivo Diccionario" se buscarán los términos y de dónde se extraerán los términos clave para la segunda etapa de búsqueda (en descripciones).
--   Si el valor es una lista vacía `[]` (predeterminado si la clave no existe en el archivo de configuración) o `[-1]`, la aplicación buscará en **todas las columnas del diccionario que sean de tipo texto u objeto**.
--   Puedes especificar una lista de índices basados en cero, por ejemplo: `[0, 2, 5]`, para que la búsqueda en el diccionario se restrinja únicamente a la primera, tercera y sexta columna.
+En `config_buscador_v0_6_5.json`, la clave `indices_columnas_busqueda_dic`:
+-   `[]` o `[-1]`: Busca en todas las columnas de texto/objeto del diccionario.
+-   `[0, 2, 5]`: Busca solo en la primera, tercera y sexta columna.
 
 ---
 
 ## 🚀 Ejecución de la Aplicación
 
-Una vez instaladas las dependencias y con el entorno virtual activado (si creaste uno), ejecuta el script desde tu terminal:
-
+Con el entorno virtual activado (si se usó):
 ```bash
-python buscador_excel_fusionado.py
+python Buscador_v0_6_5.py
