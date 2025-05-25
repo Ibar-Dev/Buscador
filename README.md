@@ -1,3 +1,4 @@
+# Buscador 
 readme_content = """# Buscador v0.7.5
 
 ![Python](https://img.shields.io/badge/Python-3.6%2B-blue)
