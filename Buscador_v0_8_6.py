@@ -251,18 +251,36 @@ class MotorBusqueda:
     def _descomponer_nivel1_or(self, texto_complejo: str) -> Tuple[str, List[str]]:
         texto_limpio = texto_complejo.strip();
         if not texto_limpio: return "OR", []
-        if '+' in texto_limpio and not (texto_limpio.startswith("(") and texto_limpio.endswith(")")):
-             logger.debug(f"Descomp. N1 (OR) para '{texto_complejo}': Detectado '+' de alto nivel, tratando como AND. Segmento=['{texto_limpio}']")
-             return "AND", [texto_limpio]
+        # Si contiene '+' y no está encapsulado por un par de paréntesis balanceados que lo contengan todo,
+        # entonces el '+' es de mayor precedencia para este nivel de parseo.
+        # Ejemplo: "A + B | C" -> AND primero si no hay paréntesis. "(A+B) | C" -> OR primero.
+        # Esta función es para el primer nivel de parseo, buscando ORs de alto nivel.
+        # Si la query es "(X|Y) + (Z|W)", esta función debería devolver "AND", ["(X|Y) + (Z|W)"]
+        # porque no hay un OR de nivel superior que separe esos dos bloques.
+        
+        # Heurística simple: si hay un '+' y no es una frase como "(A+B)", el '+' domina.
+        # Esto asume que los ORs están DENTRO de los operandos de un AND, o que no hay ANDs.
+        if '+' in texto_limpio:
+            # Si la query entera está entre paréntesis y contiene un OR, ej: "(A | B)"
+            # y esta función es llamada DESPUÉS de que un split por '+' la haya aislado,
+            # entonces debe procesar el OR interno.
+            # Pero si es el primer parseo de, ej: "X + (A|B)", el '+' es más fuerte.
+            # La lógica actual de _procesar_busqueda_en_df_objetivo llama a _descomponer_nivel1_or
+            # para la query completa, y luego _descomponer_nivel2_and para los segmentos.
+            # Para la query `(A|B) + (C|D)`, _descomponer_nivel1_or debería devolverla como un bloque AND.
+            # Si el término es solo `(A|B)`, entonces sí debe devolver un OR.
+            
+            # Si el texto NO empieza con '(' y termina con ')' O si, empezando y terminando con '()',
+            # aún contiene '+' FUERA de otros paréntesis internos, entonces es un AND.
+            # Esto es complejo de parsear con regex simples.
+            # Por ahora, mantenemos la lógica anterior, ya que el filtrado secuencial para AND
+            # en `buscar()` hace que esta función solo reciba queries OR simples o términos simples.
+            pass # No se cambia la lógica de esta función, se asume que recibe queries OR simples.
+
 
         separadores_or = [(r"\s*\|\s*", "|"), (r"\s*/\s*", "/")]
         for sep_regex, sep_char_literal in separadores_or:
-            # Solo dividir si el separador no está dentro de un par de paréntesis balanceados
-            # Esta es una heurística simple, un parser completo sería más robusto
-            # Por ahora, si hay '+' en la query, asumimos que los ORs son de menor precedencia (dentro de los AND)
-            # y se manejaron o se manejarán por llamadas recursivas o parseo de los bloques AND.
-            # Si NO hay '+', entonces los '|' y '/' son de alto nivel.
-            if '+' not in texto_limpio and sep_char_literal in texto_limpio:
+            if sep_char_literal in texto_limpio:
                 segmentos_potenciales = [s.strip() for s in re.split(sep_regex, texto_limpio) if s.strip()]
                 if len(segmentos_potenciales) > 1 or (len(segmentos_potenciales) == 1 and texto_limpio != segmentos_potenciales[0]):
                     logger.debug(f"Descomp. N1 (OR) para '{texto_complejo}': Op=OR, Segs={segmentos_potenciales}")
@@ -284,19 +302,6 @@ class MotorBusqueda:
             termino_original_procesado = str(termino_original_bruto).strip()
             es_frase_exacta = False
             termino_final_para_analisis = termino_original_procesado
-
-            # Quitar paréntesis solo si son el par más externo y no es una frase con comillas dentro
-            if len(termino_final_para_analisis) >= 2 and \
-               termino_final_para_analisis.startswith('(') and \
-               termino_final_para_analisis.endswith(')') and \
-               '"' not in termino_final_para_analisis[1:-1]: # No quitar si hay comillas dentro
-                # Esta lógica es delicada. Si es "(A|B)", se pasa tal cual a _procesar_...
-                # Si es "(A B)" sin comillas internas, se quitan paréntesis.
-                # Si es "(\"A B\")", no se quitan los paréntesis aquí.
-                # El objetivo es que _analizar_terminos solo procese términos atómicos o frases "limpias".
-                # Las sub-queries OR deben ser manejadas por la recursión en _procesar_busqueda_en_df_objetivo.
-                # Si es una frase exacta entre comillas DENTRO de paréntesis, las comillas prevalecen.
-                pass # No quitamos paréntesis aquí, la lógica de OR debe manejarlo.
 
             if len(termino_final_para_analisis) >= 2 and \
                termino_final_para_analisis.startswith('"') and \
@@ -334,10 +339,73 @@ class MotorBusqueda:
         return terminos_analizados
 
     def _parse_numero(self, num_str: Any) -> Optional[float]:
-        if isinstance(num_str, (int, float)): return float(num_str)
-        if not isinstance(num_str, str): return None
-        try: return float(num_str.replace(",", "."))
-        except ValueError: return None
+        """
+        Convierte una cadena que representa un número a float,
+        manejando comas como decimales y puntos como miles según la regla de 3+ dígitos.
+        """
+        if isinstance(num_str, (int, float)):
+            return float(num_str)
+        if not isinstance(num_str, str):
+            return None
+
+        s_limpio = num_str.strip()
+        if not s_limpio:
+            return None
+
+        # Paso 1: Normalizar comas a puntos para un manejo uniforme de puntos.
+        s_con_puntos = s_limpio.replace(',', '.')
+
+        # Paso 2: Dividir por puntos para analizar los segmentos.
+        partes = s_con_puntos.split('.')
+
+        try:
+            if len(partes) == 1:
+                # No hay puntos (o era originalmente un entero sin comas).
+                # Ej: "100", "10000" (proveniente de "10,000" o "10.000" ya procesados por el replace si la lógica fuera diferente)
+                # Con la lógica actual de replace arriba, si era "10.000", aquí partes sería ["10000"]
+                # si el replace de puntos se hiciera primero.
+                # Con la lógica actual `s_con_puntos = s_limpio.replace(',', '.')`
+                # "100" -> ["100"]
+                # "10.000" -> ["10", "000"]
+                # "10,00" -> ["10", "00"]
+                return float(partes[0])
+            
+            # len(partes) > 1, significa que hay al menos un punto.
+            ultima_parte = partes[-1]
+            partes_principales_str = "".join(partes[:-1]) # Todo excepto el último segmento, sin puntos intermedios.
+
+            # Aplicar la regla de los 3+ dígitos para el último segmento
+            if ultima_parte.isdigit():
+                if len(ultima_parte) >= 3:
+                    # El último punto (y todos los anteriores) se consideran separadores de miles.
+                    # Se unen todas las partes (incluida la última) sin ningún punto.
+                    numero_reconstruido_str = "".join(partes)
+                    logger.debug(f"Parseo num: '{num_str}' -> '{s_con_puntos}' -> partes={partes}. Última parte '{ultima_parte}' (>=3 dig) -> miles. Reconstruido: '{numero_reconstruido_str}'")
+                    return float(numero_reconstruido_str)
+                elif len(ultima_parte) == 1 or len(ultima_parte) == 2 :
+                    # El último punto es un separador decimal.
+                    # Las partes principales (concatenadas sin puntos) forman la parte entera.
+                    numero_reconstruido_str = f"{partes_principales_str}.{ultima_parte}"
+                    logger.debug(f"Parseo num: '{num_str}' -> '{s_con_puntos}' -> partes={partes}. Última parte '{ultima_parte}' (1-2 dig) -> decimal. Reconstruido: '{numero_reconstruido_str}'")
+                    return float(numero_reconstruido_str)
+                else: # len(ultima_parte) == 0 (ej: "10.") o no es dígito (regex debería prevenir esto)
+                    if not ultima_parte: # Si num_str era "10." o "1.234."
+                        logger.debug(f"Parseo num: '{num_str}' -> '{s_con_puntos}' -> partes={partes}. Última parte vacía. Reconstruido: '{partes_principales_str}'")
+                        return float(partes_principales_str) # "10" o "1234"
+                    else: # Última parte no es dígito y no vacía (ej. "10.A") - debería ser filtrado por regex antes.
+                        logger.warning(f"Parseo num: Formato de última parte no reconocido '{ultima_parte}' de '{num_str}'.")
+                        return None
+            else: # Última parte no es enteramente dígitos (ej. "10.5V" si regex falló, o "10.A5")
+                logger.warning(f"Parseo num: Última parte '{ultima_parte}' de '{num_str}' no es puramente numérica.")
+                # Intento de fallback si la cadena original era simple y válida para float()
+                if s_con_puntos.count('.') == 1 and s_con_puntos.replace('.', '', 1).isdigit():
+                     logger.debug(f"Parseo num: Fallback para '{s_con_puntos}' como decimal simple.")
+                     return float(s_con_puntos)
+                return None
+        except ValueError:
+            logger.warning(f"Parseo num: ValueError al convertir '{num_str}' (procesado como '{s_con_puntos}') a float.")
+            return None
+
 
     def _generar_mascara_para_un_termino(self, df: pd.DataFrame, cols: List[str], term_an: Dict[str, Any]) -> pd.Series:
         tipo_termino = term_an["tipo"]; valor_termino = term_an["valor"]; unidad_requerida_canonica = term_an.get("unidad_busqueda")
@@ -350,7 +418,9 @@ class MotorBusqueda:
                     if pd.isna(valor_celda_raw) or str(valor_celda_raw).strip() == "": continue
                     for match_num_unidad_celda in self.patron_num_unidad_df.finditer(str(valor_celda_raw)):
                         try:
-                            num_celda_val = self._parse_numero(match_num_unidad_celda.group(1)); u_c_raw = match_num_unidad_celda.group(2)
+                            num_celda_str = match_num_unidad_celda.group(1) # String numérico extraído
+                            num_celda_val = self._parse_numero(num_celda_str) # Parseo mejorado
+                            u_c_raw = match_num_unidad_celda.group(2)
                             if num_celda_val is None: continue
                             u_c_canon = self.extractor_magnitud.obtener_magnitud_normalizada(u_c_raw.strip()) if u_c_raw and u_c_raw.strip() else None
                             u_ok = (unidad_requerida_canonica is None) or \
@@ -366,7 +436,7 @@ class MotorBusqueda:
                             elif tipo_termino == "range" and ((valor_termino[0] <= num_celda_val or np.isclose(num_celda_val, valor_termino[0])) and \
                                                                (num_celda_val <= valor_termino[1] or np.isclose(num_celda_val, valor_termino[1]))): cond = True
                             if cond: mascara_columna_actual_numerica.at[indice_fila] = True; break
-                        except ValueError: continue
+                        except ValueError: continue # Error en _parse_numero ya debería retornar None
                 mascara_total_termino |= mascara_columna_actual_numerica
             elif tipo_termino == "str":
                 try:
@@ -384,7 +454,17 @@ class MotorBusqueda:
         if not term_an_seg: return pd.Series(False, index=df.index)
         mascara_final = pd.Series(True, index=df.index)
         for term_ind_an in term_an_seg:
-            mascara_este_term = self._generar_mascara_para_un_termino(df, cols, term_ind_an)
+            if term_ind_an["tipo"] == "str" and \
+               ("|" in term_ind_an["original"] or "/" in term_ind_an["original"]) and \
+               term_ind_an["original"].startswith("(") and term_ind_an["original"].endswith(")"):
+                logger.debug(f"Segmento AND contiene sub-query OR: '{term_ind_an['original']}'. Se procesará por separado.")
+                sub_mascara_or, err_sub_or = self._procesar_busqueda_en_df_objetivo(df, cols, term_ind_an["original"], None)
+                if err_sub_or:
+                    logger.warning(f"Sub-query OR '{term_ind_an['original']}' falló: {err_sub_or}")
+                    return pd.Series(False, index=df.index)
+                mascara_este_term = sub_mascara_or.reindex(df.index, fill_value=False)
+            else:
+                mascara_este_term = self._generar_mascara_para_un_termino(df, cols, term_ind_an)
             mascara_final &= mascara_este_term
             if not mascara_final.any(): break
         return mascara_final
@@ -392,21 +472,21 @@ class MotorBusqueda:
     def _combinar_mascaras_de_segmentos_or(self, lista_mascaras: List[pd.Series], df_idx_ref: Optional[pd.Index] = None) -> pd.Series:
         if not lista_mascaras:
             return pd.Series(False, index=df_idx_ref) if df_idx_ref is not None else pd.Series(dtype=bool)
-        idx_usar = df_idx_ref if df_idx_ref is not None else lista_mascaras[0].index
-        if idx_usar.empty and not lista_mascaras[0].empty: idx_usar = lista_mascaras[0].index
-        if idx_usar is None or idx_usar.empty: # Si sigue vacío después de intentar con la primera máscara
-             # Si todas las máscaras estaban vacías y no había índice de referencia, el índice puede seguir siendo None o vacío.
-             # En este caso, si la lista no estaba vacía pero las máscaras sí, devolver una serie vacía tipada.
-             # Si la lista estaba vacía, ya se manejó arriba.
+        idx_usar = df_idx_ref
+        if idx_usar is None or idx_usar.empty:
+            if lista_mascaras and not lista_mascaras[0].empty:
+                idx_usar = lista_mascaras[0].index
+        if idx_usar is None or idx_usar.empty:
             return pd.Series(dtype=bool)
 
         mascara_final = pd.Series(False, index=idx_usar)
         for masc_seg in lista_mascaras:
             if masc_seg.empty: continue
+            mascara_alineada = masc_seg
             if not masc_seg.index.equals(idx_usar):
-                try: masc_seg = masc_seg.reindex(idx_usar, fill_value=False)
+                try: mascara_alineada = masc_seg.reindex(idx_usar, fill_value=False)
                 except Exception as e_reidx: logger.error(f"Fallo reindex máscara OR: {e_reidx}. Máscara ignorada."); continue
-            mascara_final |= masc_seg
+            mascara_final |= mascara_alineada
         return mascara_final
 
     def _procesar_busqueda_en_df_objetivo(self, df_obj: pd.DataFrame, cols_obj: List[str], termino_busqueda_original_para_este_df: str, terminos_negativos_adicionales: Optional[List[str]] = None) -> Tuple[pd.DataFrame, Optional[str]]:
@@ -439,7 +519,9 @@ class MotorBusqueda:
         if not terminos_positivos_final_para_parseo.strip():
             logger.debug(f"Sin términos positivos ('{terminos_positivos_final_para_parseo}'). Devolviendo DF post-negaciones ({len(df_actual_procesando)} filas).")
             return df_actual_procesando.copy(), None
+        
         operador_nivel1, segmentos_nivel1_or = self._descomponer_nivel1_or(terminos_positivos_final_para_parseo)
+        
         if not segmentos_nivel1_or:
             if termino_busqueda_original_para_este_df.strip() or terminos_positivos_final_para_parseo.strip():
                 msg_error_segmentos = f"Térm. positivo '{terminos_positivos_final_para_parseo}' (de '{termino_busqueda_original_para_este_df}') inválido post-OR."
@@ -448,12 +530,10 @@ class MotorBusqueda:
             else:
                 logger.debug("Query original y positiva post-negación vacías. Devolviendo DF post-negaciones.")
                 return df_actual_procesando.copy(), None
+        
         lista_mascaras_para_or: List[pd.Series] = []
         for segmento_or_actual in segmentos_nivel1_or:
             _operador_nivel2, terminos_brutos_nivel2_and = self._descomponer_nivel2_and(segmento_or_actual)
-            # Si el segmento_or_actual es una sub-query OR como "(A|B)", terminos_brutos_nivel2_and será ["(A|B)"]
-            # y _analizar_terminos lo tratará como un string literal, lo que es incorrecto para la expansión OR.
-            # Esta función está diseñada para términos atómicos después de toda la descomposición.
             terminos_atomicos_analizados_and = self._analizar_terminos(terminos_brutos_nivel2_and)
             mascara_para_segmento_or_actual: pd.Series
             if not terminos_atomicos_analizados_and:
@@ -462,15 +542,27 @@ class MotorBusqueda:
                     logger.warning(msg_error_and)
                     return pd.DataFrame(columns=df_actual_procesando.columns), msg_error_and
                 logger.debug(f"Segmento OR '{segmento_or_actual}' sin términos atómicos. Se ignora para OR.")
-                mascara_para_segmento_or_actual = pd.Series(False, index=df_actual_procesando.index)
+                if not df_actual_procesando.empty: mascara_para_segmento_or_actual = pd.Series(False, index=df_actual_procesando.index)
+                else: mascara_para_segmento_or_actual = pd.Series(dtype=bool)
             else:
                 mascara_para_segmento_or_actual = self._aplicar_mascara_combinada_para_segmento_and(df_actual_procesando, cols_obj, terminos_atomicos_analizados_and)
             lista_mascaras_para_or.append(mascara_para_segmento_or_actual)
-        if not lista_mascaras_para_or:
-            logger.error("Error interno: no se generaron máscaras OR a pesar de segmentos N1.")
+            
+        if not lista_mascaras_para_or and not df_actual_procesando.empty :
+            logger.error("Error interno: no se generaron máscaras OR a pesar de segmentos N1 y DF no vacío.")
             return pd.DataFrame(columns=df_actual_procesando.columns), "Error interno: no se generaron máscaras OR."
-        mascara_final_df_objetivo = self._combinar_mascaras_de_segmentos_or(lista_mascaras_para_or, df_actual_procesando.index)
-        df_resultado_final = df_actual_procesando[mascara_final_df_objetivo].copy()
+        elif not lista_mascaras_para_or and df_actual_procesando.empty:
+            return df_actual_procesando.copy(), None
+
+        mascara_final_df_objetivo = self._combinar_mascaras_de_segmentos_or(lista_mascaras_para_or, df_actual_procesando.index if not df_actual_procesando.empty else None)
+        
+        if mascara_final_df_objetivo.empty and not df_actual_procesando.empty:
+             df_resultado_final = pd.DataFrame(columns=df_actual_procesando.columns)
+        elif mascara_final_df_objetivo.empty and df_actual_procesando.empty:
+             df_resultado_final = df_actual_procesando.copy()
+        else:
+             df_resultado_final = df_actual_procesando[mascara_final_df_objetivo].copy()
+
         logger.debug(f"Resultado _procesar_busqueda_en_df_objetivo para '{termino_busqueda_original_para_este_df}': {len(df_resultado_final)} filas.")
         return df_resultado_final, None
 
@@ -511,81 +603,55 @@ class MotorBusqueda:
             _df_dummy, terminos_positivos_globales, terminos_negativos_globales = self._aplicar_negaciones_y_extraer_positivos(pd.DataFrame(), [], termino_busqueda_original)
             logger.info(f"Parseo global: Positivos='{terminos_positivos_globales}', Negativos Globales={terminos_negativos_globales}")
 
-            # --- INICIO DE LÓGICA MEJORADA PARA AND (+) ---
-            if "+" in terminos_positivos_globales:
+            if "+" in terminos_positivos_globales: # --- INICIO DE LÓGICA MEJORADA PARA AND (+) ---
                 logger.info(f"Detectada búsqueda AND en positivos globales: '{terminos_positivos_globales}'")
                 partes_and = [p.strip() for p in terminos_positivos_globales.split("+") if p.strip()]
                 
-                # DataFrame para acumular resultados de descripciones después de cada filtro OR de una parte AND
                 df_resultado_acumulado_desc = self.datos_descripcion.copy() if self.datos_descripcion is not None else pd.DataFrame(columns=columnas_descripcion_ref)
-                
-                fcds_indices_acumulados = set() # Para acumular índices de FCDs de todas las partes AND
-                todas_partes_and_produjeron_terminos_validos = True 
-                hay_error_en_busqueda_de_parte = False
-                error_msg_de_parte: Optional[str] = None
+                fcds_indices_acumulados = set()
+                todas_partes_and_produjeron_terminos_validos = True
+                hay_error_en_busqueda_de_parte_o_desc = False
+                error_msg_critico_partes: Optional[str] = None
 
-                if self.datos_descripcion is None: # Necesario para el filtrado secuencial
+                if self.datos_descripcion is None:
                      logger.error("Archivo de descripciones no cargado, no se puede proceder con búsqueda AND vía diccionario.")
                      return None, OrigenResultados.ERROR_CARGA_DESCRIPCION, None, None, "Descripciones no cargadas para búsqueda AND."
 
-                columnas_desc_para_filtrado_secuencial, err_cols_desc_sec = self._obtener_nombres_columnas_busqueda_df(
-                    self.datos_descripcion, [], "descripcion_fcds" # Usar las mismas columnas que el flujo OR simple
-                )
-                if not columnas_desc_para_filtrado_secuencial:
-                    return None, OrigenResultados.ERROR_CONFIGURACION_COLUMNAS_DESC, None, None, err_cols_desc_sec
+                columnas_desc_para_filtrado, err_cols_desc_fil = self._obtener_nombres_columnas_busqueda_df(self.datos_descripcion, [], "descripcion_fcds")
+                if not columnas_desc_para_filtrado:
+                    return None, OrigenResultados.ERROR_CONFIGURACION_COLUMNAS_DESC, None, None, err_cols_desc_fil
 
                 for i, parte_and_actual_str in enumerate(partes_and):
                     if not parte_and_actual_str: continue
-                    
                     logger.debug(f"Procesando parte AND '{parte_and_actual_str}' (parte {i+1}/{len(partes_and)}) en diccionario...")
-                    fcds_para_esta_parte, error_fcd_parte = self._procesar_busqueda_en_df_objetivo(
-                        self.datos_diccionario, columnas_dic_para_fcds, parte_and_actual_str, None
-                    )
-
-                    if error_fcd_parte or fcds_para_esta_parte is None or fcds_para_esta_parte.empty:
+                    fcds_para_esta_parte, error_fcd_parte = self._procesar_busqueda_en_df_objetivo(self.datos_diccionario, columnas_dic_para_fcds, parte_and_actual_str, None)
+                    if error_fcd_parte:
+                        todas_partes_and_produjeron_terminos_validos = False; hay_error_en_busqueda_de_parte_o_desc = True; error_msg_critico_partes = error_fcd_parte
+                        logger.warning(f"Parte AND '{parte_and_actual_str}' falló en diccionario con error: {error_fcd_parte}"); break
+                    if fcds_para_esta_parte is None or fcds_para_esta_parte.empty:
                         todas_partes_and_produjeron_terminos_validos = False
-                        logger.warning(f"Parte AND '{parte_and_actual_str}' no encontró FCDs en diccionario. Error: {error_fcd_parte}")
-                        break 
-                    
+                        logger.warning(f"Parte AND '{parte_and_actual_str}' no encontró FCDs en diccionario."); break
                     fcds_indices_acumulados.update(fcds_para_esta_parte.index.tolist())
-                    
                     terminos_extraidos_de_esta_parte_set: Set[str] = set()
-                    for _, fila_fcd in fcds_para_esta_parte.iterrows():
-                        terminos_extraidos_de_esta_parte_set.update(self._extraer_terminos_de_fila_completa(fila_fcd))
-                    
+                    for _, fila_fcd in fcds_para_esta_parte.iterrows(): terminos_extraidos_de_esta_parte_set.update(self._extraer_terminos_de_fila_completa(fila_fcd))
                     if not terminos_extraidos_de_esta_parte_set:
                         todas_partes_and_produjeron_terminos_validos = False
-                        logger.warning(f"Parte AND '{parte_and_actual_str}' encontró FCDs, pero no se extrajeron términos de ellas.")
-                        break
-                    
+                        logger.warning(f"Parte AND '{parte_and_actual_str}' encontró FCDs, pero no se extrajeron términos de ellas."); break
                     terminos_or_con_comillas_actual = [f'"{t}"' if " " in t and not (t.startswith('"') and t.endswith('"')) else t for t in terminos_extraidos_de_esta_parte_set if t]
                     query_or_simple_actual = " | ".join(terminos_or_con_comillas_actual)
-
                     if not query_or_simple_actual:
                         todas_partes_and_produjeron_terminos_validos = False
-                        logger.warning(f"Parte AND '{parte_and_actual_str}' no generó una query OR válida para descripciones.")
-                        break
-
-                    if df_resultado_acumulado_desc.empty: # Si un filtro OR anterior ya vació los resultados
-                         logger.info(f"Resultados acumulados de descripción vacíos antes de aplicar filtro para '{parte_and_actual_str}'. Búsqueda AND final será vacía.")
-                         # todas_partes_and_produjeron_terminos_validos ya podría ser False, o el resultado final será vacío.
-                         break 
-
+                        logger.warning(f"Parte AND '{parte_and_actual_str}' no generó una query OR válida para descripciones."); break
+                    if df_resultado_acumulado_desc.empty and i >= 0:
+                         logger.info(f"Resultados acumulados de descripción vacíos antes de aplicar filtro para '{parte_and_actual_str}'. Búsqueda AND final será vacía."); break
                     logger.info(f"Aplicando filtro OR para '{parte_and_actual_str}' (Query: '{query_or_simple_actual[:100]}...') sobre {len(df_resultado_acumulado_desc)} filas de descripción.")
-                    df_resultado_acumulado_desc, error_sub_busqueda_desc = self._procesar_busqueda_en_df_objetivo(
-                        df_resultado_acumulado_desc, columnas_desc_para_filtrado_secuencial, query_or_simple_actual, None
-                    )
-                    
+                    df_resultado_acumulado_desc, error_sub_busqueda_desc = self._procesar_busqueda_en_df_objetivo(df_resultado_acumulado_desc, columnas_desc_para_filtrado, query_or_simple_actual, None)
                     if error_sub_busqueda_desc:
-                        hay_error_en_busqueda_de_parte = True; error_msg_de_parte = error_sub_busqueda_desc
-                        logger.error(f"Error en sub-búsqueda OR para '{query_or_simple_actual}': {error_sub_busqueda_desc}")
-                        break
-                    
+                        hay_error_en_busqueda_de_parte_o_desc = True; error_msg_critico_partes = error_sub_busqueda_desc
+                        logger.error(f"Error en sub-búsqueda OR para '{query_or_simple_actual}': {error_sub_busqueda_desc}"); break
                     if df_resultado_acumulado_desc.empty:
-                        logger.info(f"Filtro OR para '{parte_and_actual_str}' no encontró coincidencias en resultados acumulados. Búsqueda AND final será vacía.")
-                        break 
+                        logger.info(f"Filtro OR para '{parte_and_actual_str}' no encontró coincidencias en resultados acumulados. Búsqueda AND final será vacía."); break
                 
-                # Preparar FCDs para UI (incluso si la búsqueda en descripciones falla o da vacío)
                 if fcds_indices_acumulados and self.datos_diccionario is not None:
                     fcds_obtenidos_final_para_ui = self.datos_diccionario.loc[list(fcds_indices_acumulados)].drop_duplicates().copy()
                     indices_fcds_a_resaltar_en_preview = fcds_obtenidos_final_para_ui.index.tolist()
@@ -593,31 +659,26 @@ class MotorBusqueda:
                     fcds_obtenidos_final_para_ui = pd.DataFrame(columns=self.datos_diccionario.columns if self.datos_diccionario is not None else [])
                     indices_fcds_a_resaltar_en_preview = []
                 
-                if hay_error_en_busqueda_de_parte:
-                    return df_vacio_para_descripciones, OrigenResultados.TERMINO_INVALIDO, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, error_msg_de_parte
-                
+                if hay_error_en_busqueda_de_parte_o_desc:
+                    return df_vacio_para_descripciones, OrigenResultados.TERMINO_INVALIDO, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, error_msg_critico_partes
                 if not todas_partes_and_produjeron_terminos_validos or df_resultado_acumulado_desc.empty:
                     origen_fallo_and = OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS if not todas_partes_and_produjeron_terminos_validos else OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC
                     logger.info(f"Búsqueda AND '{terminos_positivos_globales}' no produjo resultados finales en descripciones (Origen: {origen_fallo_and.name}).")
                     return df_vacio_para_descripciones, origen_fallo_and, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
                 
-                # Si todo OK, aplicar negativos globales al resultado acumulado de descripciones
                 resultados_desc_final_filtrado_and = df_resultado_acumulado_desc
                 if not resultados_desc_final_filtrado_and.empty and terminos_negativos_globales:
                     logger.info(f"Aplicando negativos globales {terminos_negativos_globales} a {len(resultados_desc_final_filtrado_and)} filas (resultado del AND de ORs)")
                     query_solo_negados_globales = " ".join([f"#{neg}" for neg in terminos_negativos_globales])
-                    resultados_desc_final_filtrado_and, _, _ = self._aplicar_negaciones_y_extraer_positivos(
-                        resultados_desc_final_filtrado_and, columnas_desc_para_filtrado_secuencial, query_solo_negados_globales
-                    )
+                    df_temp_neg, _, _ = self._aplicar_negaciones_y_extraer_positivos(resultados_desc_final_filtrado_and, columnas_desc_para_filtrado, query_solo_negados_globales)
+                    resultados_desc_final_filtrado_and = df_temp_neg
                 
                 logger.info(f"Búsqueda AND '{terminos_positivos_globales}' vía diccionario produjo {len(resultados_desc_final_filtrado_and)} resultados en descripciones.")
                 return resultados_desc_final_filtrado_and, OrigenResultados.VIA_DICCIONARIO_CON_RESULTADOS_DESC, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
-            
             # --- FIN DE LÓGICA MEJORADA PARA AND (+) ---
             else: # terminos_positivos_globales NO contiene '+', flujo original para queries simples/puramente negativas
                 origen_propuesto_flujo_simple: OrigenResultados = OrigenResultados.NINGUNO
                 fcds_query_simple: Optional[pd.DataFrame] = None
-
                 if terminos_positivos_globales.strip():
                     logger.info(f"BUSCAR EN DICC (FCDs) - Positivos (sin AND de alto nivel): Query='{terminos_positivos_globales}'")
                     origen_propuesto_flujo_simple = OrigenResultados.VIA_DICCIONARIO_CON_RESULTADOS_DESC
@@ -626,8 +687,7 @@ class MotorBusqueda:
                         if error_dic_pos: return None, OrigenResultados.TERMINO_INVALIDO, None, None, error_dic_pos
                         fcds_query_simple = fcds_temp
                     except Exception as e_dic_pos:
-                        logger.exception("Excepción búsqueda en diccionario (positivos simples).")
-                        return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, None, None, f"Error motor (dicc-positivos simples): {e_dic_pos}"
+                        logger.exception("Excepción búsqueda en diccionario (positivos simples)."); return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, None, None, f"Error motor (dicc-positivos simples): {e_dic_pos}"
                 elif terminos_negativos_globales:
                     logger.info(f"BUSCAR EN DICC (FCDs) - Puramente Negativo: Negs Globales={terminos_negativos_globales}")
                     origen_propuesto_flujo_simple = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC
@@ -636,10 +696,8 @@ class MotorBusqueda:
                         if error_dic_neg: return None, OrigenResultados.TERMINO_INVALIDO, None, None, error_dic_neg
                         fcds_query_simple = fcds_temp
                     except Exception as e_dic_neg:
-                        logger.exception("Excepción búsqueda en diccionario (puramente negativo).")
-                        return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, None, None, f"Error motor (dicc-negativo): {e_dic_neg}"
-                else:
-                    return df_vacio_para_descripciones, OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS, None, None, None
+                        logger.exception("Excepción búsqueda en diccionario (puramente negativo)."); return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, None, None, f"Error motor (dicc-negativo): {e_dic_neg}"
+                else: return df_vacio_para_descripciones, OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS, None, None, None
 
                 fcds_obtenidos_final_para_ui = fcds_query_simple
                 if fcds_obtenidos_final_para_ui is not None and not fcds_obtenidos_final_para_ui.empty:
@@ -648,57 +706,37 @@ class MotorBusqueda:
                 else:
                     logger.info(f"No se encontraron FCDs en diccionario para '{termino_busqueda_original}' (flujo simple/negativo).")
                     return df_vacio_para_descripciones, OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
-
                 if self.datos_descripcion is None: return None, OrigenResultados.ERROR_CARGA_DESCRIPCION, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, "Descripciones no cargadas."
-                
                 terminos_para_buscar_en_descripcion_set: Set[str] = set()
-                for _, fila_fcd in fcds_obtenidos_final_para_ui.iterrows():
-                    terminos_para_buscar_en_descripcion_set.update(self._extraer_terminos_de_fila_completa(fila_fcd))
-
+                for _, fila_fcd in fcds_obtenidos_final_para_ui.iterrows(): terminos_para_buscar_en_descripcion_set.update(self._extraer_terminos_de_fila_completa(fila_fcd))
                 if not terminos_para_buscar_en_descripcion_set:
                     logger.info("FCDs encontrados (flujo simple/negativo), pero no se extrajeron términos para descripciones.")
                     origen_final_sinterm = OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS
-                    if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC:
-                        origen_final_sinterm = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC
+                    if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC: origen_final_sinterm = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC
                     return df_vacio_para_descripciones, origen_final_sinterm, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
-                
                 logger.info(f"Términos para desc ({len(terminos_para_buscar_en_descripcion_set)} únicos, muestra): {sorted(list(terminos_para_buscar_en_descripcion_set))[:10]}...")
                 terminos_or_con_comillas_desc = [f'"{t}"' if " " in t and not (t.startswith('"') and t.endswith('"')) else t for t in terminos_para_buscar_en_descripcion_set if t]
                 query_or_para_desc_simple = " | ".join(terminos_or_con_comillas_desc)
-
                 if not query_or_para_desc_simple:
                     origen_q_vacia = OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS
-                    if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC:
-                         origen_q_vacia = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC
+                    if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC: origen_q_vacia = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC
                     return df_vacio_para_descripciones, origen_q_vacia, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, "Query OR para descripciones vacía."
-
                 columnas_desc_final_simple, err_cols_desc_final_simple = self._obtener_nombres_columnas_busqueda_df(self.datos_descripcion, [], "descripcion_fcds")
-                if not columnas_desc_final_simple:
-                    return None, OrigenResultados.ERROR_CONFIGURACION_COLUMNAS_DESC, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, err_cols_desc_final_simple
-
+                if not columnas_desc_final_simple: return None, OrigenResultados.ERROR_CONFIGURACION_COLUMNAS_DESC, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, err_cols_desc_final_simple
                 negativos_a_aplicar_desc_simple = terminos_negativos_globales
-                if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC:
-                     negativos_a_aplicar_desc_simple = []
-
+                if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC: negativos_a_aplicar_desc_simple = []
                 logger.info(f"BUSCAR EN DESC (vía FCD simple/negativa): Query='{query_or_para_desc_simple[:200]}...'. Neg. Globales a aplicar: {negativos_a_aplicar_desc_simple}")
                 try:
-                    resultados_desc_final_simple, error_busqueda_desc_simple = self._procesar_busqueda_en_df_objetivo(
-                        self.datos_descripcion, columnas_desc_final_simple, query_or_para_desc_simple,
-                        terminos_negativos_adicionales=negativos_a_aplicar_desc_simple
-                    )
-                    if error_busqueda_desc_simple:
-                        return df_vacio_para_descripciones, OrigenResultados.TERMINO_INVALIDO, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, error_busqueda_desc_simple
+                    resultados_desc_final_simple, error_busqueda_desc_simple = self._procesar_busqueda_en_df_objetivo(self.datos_descripcion, columnas_desc_final_simple, query_or_para_desc_simple,terminos_negativos_adicionales=negativos_a_aplicar_desc_simple)
+                    if error_busqueda_desc_simple: return df_vacio_para_descripciones, OrigenResultados.TERMINO_INVALIDO, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, error_busqueda_desc_simple
                     if resultados_desc_final_simple is None or resultados_desc_final_simple.empty:
                         origen_res_desc_vacio_simple = OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC
-                        if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC:
-                            origen_res_desc_vacio_simple = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC
+                        if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC: origen_res_desc_vacio_simple = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC
                         return df_vacio_para_descripciones, origen_res_desc_vacio_simple, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
-                    else:
-                        return resultados_desc_final_simple, origen_propuesto_flujo_simple, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
+                    else: return resultados_desc_final_simple, origen_propuesto_flujo_simple, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
                 except Exception as e_desc_proc_simple:
-                    logger.exception("Excepción búsqueda final en descripciones (flujo simple/negativo).")
-                    return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, f"Error motor (desc final simple/negativo): {e_desc_proc_simple}"
-        else: # Búsqueda directa en descripciones (buscar_via_diccionario_flag es False)
+                    logger.exception("Excepción búsqueda final en descripciones (flujo simple/negativo)."); return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, f"Error motor (desc final simple/negativo): {e_desc_proc_simple}"
+        else: # Búsqueda directa en descripciones
             if self.datos_descripcion is None: return None, OrigenResultados.ERROR_CARGA_DESCRIPCION, None, None, "Descripciones no cargadas."
             columnas_desc_directo, err_cols_desc_directo = self._obtener_nombres_columnas_busqueda_df(self.datos_descripcion, [], "descripcion")
             if not columnas_desc_directo: return None, OrigenResultados.ERROR_CONFIGURACION_COLUMNAS_DESC, None, None, err_cols_desc_directo
@@ -709,8 +747,7 @@ class MotorBusqueda:
                 if resultados_directos_desc is None or resultados_directos_desc.empty: return df_vacio_para_descripciones, OrigenResultados.DIRECTO_DESCRIPCION_VACIA, None, None, None
                 else: return resultados_directos_desc, OrigenResultados.DIRECTO_DESCRIPCION_CON_RESULTADOS, None, None, None
             except Exception as e_desc_dir_proc:
-                logger.exception("Excepción búsqueda directa en descripciones.")
-                return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, None, None, f"Error motor (desc directa): {e_desc_dir_proc}"
+                logger.exception("Excepción búsqueda directa en descripciones."); return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, None, None, f"Error motor (desc directa): {e_desc_dir_proc}"
 
 # --- Interfaz Gráfica ---
 class InterfazGrafica(tk.Tk):
@@ -718,7 +755,7 @@ class InterfazGrafica(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("Buscador Avanzado v1.8 (AND Secuencial Depurado)") # Versión actualizada
+        self.title("Buscador Avanzado v1.9 (Parseo Num Mejorado)") # Versión actualizada
         self.geometry("1250x800")
         self.config: Dict[str, Any] = self._cargar_configuracion_app()
         indices_cfg_preview_dic = self.config.get("indices_columnas_busqueda_dic_preview", [])
@@ -744,31 +781,18 @@ class InterfazGrafica(tk.Tk):
         self._actualizar_mensaje_barra_estado("Listo. Cargue Diccionario y Descripciones.")
         self._deshabilitar_botones_operadores()
         self._actualizar_estado_general_botones_y_controles()
-        logger.info(f"Interfaz Gráfica (v1.8 AND Secuencial Depurado) inicializada.")
+        logger.info(f"Interfaz Gráfica (v1.9 Parseo Num Mejorado) inicializada.")
 
     def _try_except_wrapper(self, func, *args, **kwargs):
-        """Wrapper para añadir try-except a funciones de callback de forma genérica."""
         try:
             return func(*args, **kwargs)
         except Exception as e:
-            func_name = func.__name__
-            error_type = type(e).__name__
-            error_msg = str(e)
-            tb_str = traceback.format_exc()
-            
+            func_name = func.__name__; error_type = type(e).__name__; error_msg = str(e); tb_str = traceback.format_exc()
             logger.critical(f"Error en {func_name}: {error_type} - {error_msg}\n{tb_str}")
-            print(f"--- TRACEBACK COMPLETO (desde _try_except_wrapper para {func_name}) ---\n{tb_str}") # Imprime en consola
-            messagebox.showerror(
-                f"Error Interno en {func_name}",
-                f"Ocurrió un error inesperado:\n{error_type}: {error_msg}\n\nConsulte el log y la consola para el traceback completo."
-            )
-            # Dependiendo de la función, podrías querer retornar un valor por defecto o None
-            if func_name in ["_cargar_diccionario_ui", "_cargar_excel_descripcion_ui"]:
-                # Podrías querer actualizar la UI para reflejar el fallo si es necesario
-                self._actualizar_etiquetas_archivos_cargados()
-                self._actualizar_estado_general_botones_y_controles()
-            return None # O un valor apropiado según la función original
-
+            print(f"--- TRACEBACK COMPLETO (desde _try_except_wrapper para {func_name}) ---\n{tb_str}")
+            messagebox.showerror(f"Error Interno en {func_name}", f"Ocurrió un error inesperado:\n{error_type}: {error_msg}\n\nConsulte el log y la consola para el traceback completo.")
+            if func_name in ["_cargar_diccionario_ui", "_cargar_excel_descripcion_ui"]: self._actualizar_etiquetas_archivos_cargados(); self._actualizar_estado_general_botones_y_controles()
+            return None
 
     def _on_texto_busqueda_change(self, var_name: str, index: str, mode: str): self._actualizar_estado_botones_operadores()
     def _cargar_configuracion_app(self) -> Dict[str, Any]:
@@ -811,7 +835,7 @@ class InterfazGrafica(tk.Tk):
         self.entrada_busqueda=ttk.Entry(self.marco_controles,width=60,textvariable=self.texto_busqueda_var)
         self.btn_buscar=ttk.Button(self.marco_controles,text="Buscar",command=lambda: self._try_except_wrapper(self._ejecutar_busqueda_ui))
         self.btn_salvar_regla=ttk.Button(self.marco_controles,text="Salvar Regla",command=lambda: self._try_except_wrapper(self._salvar_regla_actual_ui),state="disabled")
-        self.btn_ayuda=ttk.Button(self.marco_controles,text="?",command=self._mostrar_ayuda_ui,width=3) # Menos propenso a errores graves
+        self.btn_ayuda=ttk.Button(self.marco_controles,text="?",command=self._mostrar_ayuda_ui,width=3)
         self.btn_exportar=ttk.Button(self.marco_controles,text="Exportar",command=lambda: self._try_except_wrapper(self._exportar_resultados_ui),state="disabled")
         self.lbl_tabla_diccionario=ttk.Label(self,text="Vista Previa Diccionario:")
         self.frame_tabla_diccionario=ttk.Frame(self);self.tabla_diccionario=ttk.Treeview(self.frame_tabla_diccionario,show="headings",height=8);self.scrolly_diccionario=ttk.Scrollbar(self.frame_tabla_diccionario,orient="vertical",command=self.tabla_diccionario.yview);self.scrollx_diccionario=ttk.Scrollbar(self.frame_tabla_diccionario,orient="horizontal",command=self.tabla_diccionario.xview);self.tabla_diccionario.configure(yscrollcommand=self.scrolly_diccionario.set,xscrollcommand=self.scrollx_diccionario.set)
@@ -819,7 +843,7 @@ class InterfazGrafica(tk.Tk):
         self.barra_estado=ttk.Label(self,text="Listo.",relief=tk.SUNKEN,anchor=tk.W,borderwidth=1);self._actualizar_etiquetas_archivos_cargados()
     def _configurar_grid_layout_app(self):
         self.grid_rowconfigure(2,weight=1);self.grid_rowconfigure(4,weight=3);self.grid_columnconfigure(0,weight=1);self.marco_controles.grid(row=0,column=0,sticky="new",padx=10,pady=(10,5));self.marco_controles.grid_columnconfigure(1,weight=1);self.marco_controles.grid_columnconfigure(3,weight=1);self.btn_cargar_diccionario.grid(row=0,column=0,padx=(5,0),pady=5,sticky="w");self.lbl_dic_cargado.grid(row=0,column=1,padx=(2,10),pady=5,sticky="ew");self.btn_cargar_descripciones.grid(row=0,column=2,padx=(5,0),pady=5,sticky="w");self.lbl_desc_cargado.grid(row=0,column=3,padx=(2,5),pady=5,sticky="ew");self.frame_ops.grid(row=1,column=0,columnspan=6,padx=5,pady=(5,0),sticky="ew");[self.frame_ops.grid_columnconfigure(i,weight=1) for i in range(len(self.op_buttons))];self.entrada_busqueda.grid(row=2,column=0,columnspan=2,padx=5,pady=(0,5),sticky="ew");self.btn_buscar.grid(row=2,column=2,padx=(2,0),pady=(0,5),sticky="w");self.btn_salvar_regla.grid(row=2,column=3,padx=(2,0),pady=(0,5),sticky="w");self.btn_ayuda.grid(row=2,column=4,padx=(2,0),pady=(0,5),sticky="w");self.btn_exportar.grid(row=2,column=5,padx=(10,5),pady=(0,5),sticky="e");self.lbl_tabla_diccionario.grid(row=1,column=0,sticky="sw",padx=10,pady=(10,0));self.frame_tabla_diccionario.grid(row=2,column=0,sticky="nsew",padx=10,pady=(0,10));self.frame_tabla_diccionario.grid_rowconfigure(0,weight=1);self.frame_tabla_diccionario.grid_columnconfigure(0,weight=1);self.tabla_diccionario.grid(row=0,column=0,sticky="nsew");self.scrolly_diccionario.grid(row=0,column=1,sticky="ns");self.scrollx_diccionario.grid(row=1,column=0,sticky="ew");self.lbl_tabla_resultados.grid(row=3,column=0,sticky="sw",padx=10,pady=(0,0));self.frame_tabla_resultados.grid(row=4,column=0,sticky="nsew",padx=10,pady=(0,10));self.frame_tabla_resultados.grid_rowconfigure(0,weight=1);self.frame_tabla_resultados.grid_columnconfigure(0,weight=1);self.tabla_resultados.grid(row=0,column=0,sticky="nsew");self.scrolly_resultados.grid(row=0,column=1,sticky="ns");self.scrollx_resultados.grid(row=1,column=0,sticky="ew");self.barra_estado.grid(row=5,column=0,sticky="sew",padx=0,pady=(5,0))
-    def _configurar_eventos_globales_app(self): self.entrada_busqueda.bind("<Return>",lambda e:self._try_except_wrapper(self._ejecutar_busqueda_ui));self.protocol("WM_DELETE_WINDOW",self.on_closing_app) # on_closing_app ya tiene su try-except
+    def _configurar_eventos_globales_app(self): self.entrada_busqueda.bind("<Return>",lambda e:self._try_except_wrapper(self._ejecutar_busqueda_ui));self.protocol("WM_DELETE_WINDOW",self.on_closing_app)
     def _actualizar_mensaje_barra_estado(self,m): self.barra_estado.config(text=m);logger.info(f"Mensaje UI (BarraEstado): {m}");self.update_idletasks()
     def _mostrar_ayuda_ui(self):
         texto_ayuda = ("Sintaxis:\n- Texto: `router cisco`\n- AND: `tarjeta + 16 puertos`\n- OR: `modulo | SFP` o `modulo / SFP`\n"
@@ -837,16 +861,28 @@ class InterfazGrafica(tk.Tk):
     def _configurar_funcionalidad_orden_tabla(self,tabla):
         cols = tabla["columns"]
         if cols: [tabla.heading(c,text=str(c),anchor=tk.W,command=lambda col=c,tbl=tabla: self._try_except_wrapper(self._ordenar_columna_tabla_ui,tbl,col,False)) for c in cols]
-    def _ordenar_columna_tabla_ui(self,tabla,col,rev): # Esta función ahora será llamada por el wrapper
+    def _ordenar_columna_tabla_ui(self,tabla,col,rev):
         df_copia=None;idx_resaltar=None
         if tabla==self.tabla_diccionario and self.motor.datos_diccionario is not None:df_copia=self.motor.datos_diccionario.copy();idx_resaltar=self.indices_fcds_resaltados
         elif tabla==self.tabla_resultados and self.resultados_actuales is not None:df_copia=self.resultados_actuales.copy()
         else: tabla.heading(col,command=lambda c=col,t=tabla:self._try_except_wrapper(self._ordenar_columna_tabla_ui,t,c,not rev));return
         if df_copia.empty or col not in df_copia.columns: tabla.heading(col,command=lambda c=col,t=tabla:self._try_except_wrapper(self._ordenar_columna_tabla_ui,t,c,not rev));return
-        # El try-except principal ahora está en el wrapper, se puede quitar de aquí o dejarlo para errores muy específicos del ordenamiento
         df_num=pd.to_numeric(df_copia[col],errors='coerce')
         df_ord=df_copia.sort_values(by=col,ascending=not rev,na_position='last',key=(lambda x:pd.to_numeric(x,errors='coerce')) if not df_num.isna().all() else (lambda x:x.astype(str).str.lower()))
-        if tabla==self.tabla_diccionario:self._actualizar_tabla_treeview_ui(tabla,df_ord,limite_filas=None,indices_a_resaltar=idx_resaltar)
+        
+        # Corrección: Determinar las columnas para la tabla de diccionario
+        columnas_para_diccionario_ordenado = None
+        if tabla==self.tabla_diccionario and self.motor.datos_diccionario is not None:
+            columnas_para_diccionario_ordenado, _ = self.motor._obtener_nombres_columnas_busqueda_df(
+                df_ord, # Usar el df ordenado para mantener el orden de columnas si es posible
+                self.motor.indices_columnas_busqueda_dic_preview,
+                "diccionario_preview"
+            )
+            if not columnas_para_diccionario_ordenado: # Fallback si no se obtienen
+                 columnas_para_diccionario_ordenado = list(df_ord.columns)
+
+
+        if tabla==self.tabla_diccionario:self._actualizar_tabla_treeview_ui(tabla,df_ord,limite_filas=None,columnas_a_mostrar=columnas_para_diccionario_ordenado, indices_a_resaltar=idx_resaltar)
         elif tabla==self.tabla_resultados:self.resultados_actuales=df_ord;self._actualizar_tabla_treeview_ui(tabla,self.resultados_actuales)
         tabla.heading(col,command=lambda c=col,t=tabla:self._try_except_wrapper(self._ordenar_columna_tabla_ui,t,c,not rev));self._actualizar_mensaje_barra_estado(f"Ordenado por '{col}'.")
 
@@ -854,18 +890,50 @@ class InterfazGrafica(tk.Tk):
         is_dicc=tabla==self.tabla_diccionario; tabla_nombre = "Diccionario" if is_dicc else "Resultados"
         [tabla.delete(i) for i in tabla.get_children()];tabla["columns"]=()
         if datos is None or datos.empty:self._configurar_funcionalidad_orden_tabla(tabla); logger.debug(f"Tabla '{tabla_nombre}' vaciada."); return
-        cols_orig=list(datos.columns);cols_usar=columnas_a_mostrar if columnas_a_mostrar and all(c in cols_orig for c in columnas_a_mostrar) else cols_orig
-        if not cols_usar:cols_usar=cols_orig
-        if not cols_usar:self._configurar_funcionalidad_orden_tabla(tabla); logger.debug(f"Tabla '{tabla_nombre}' sin columnas usables."); return
-        tabla["columns"]=tuple(cols_usar)
-        for c in cols_usar:
+        
+        cols_orig=list(datos.columns)
+        cols_para_usar_en_tabla: List[str]
+
+        if columnas_a_mostrar:
+            # Si columnas_a_mostrar es una lista de enteros (índices)
+            if all(isinstance(c, int) for c in columnas_a_mostrar):
+                try:
+                    cols_para_usar_en_tabla = [cols_orig[i] for i in columnas_a_mostrar if 0 <= i < len(cols_orig)]
+                except IndexError: # Si algún índice está fuera de rango
+                    logger.warning(f"Índices en columnas_a_mostrar fuera de rango para tabla '{tabla_nombre}'. Usando todas las columnas.")
+                    cols_para_usar_en_tabla = cols_orig
+            # Si columnas_a_mostrar es una lista de strings (nombres de columna)
+            elif all(isinstance(c, str) for c in columnas_a_mostrar):
+                cols_para_usar_en_tabla = [c for c in columnas_a_mostrar if c in cols_orig]
+            else: # Caso mixto o tipo inesperado, usar todas las columnas
+                logger.warning(f"Tipo inesperado para columnas_a_mostrar en tabla '{tabla_nombre}'. Usando todas las columnas.")
+                cols_para_usar_en_tabla = cols_orig
+            
+            if not cols_para_usar_en_tabla : # Fallback si la selección no dio nada válido
+                logger.warning(f"columnas_a_mostrar no resultó en columnas válidas para tabla '{tabla_nombre}'. Usando todas las columnas.")
+                cols_para_usar_en_tabla = cols_orig
+        else: # Si columnas_a_mostrar es None
+            cols_para_usar_en_tabla = cols_orig
+
+        if not cols_para_usar_en_tabla:self._configurar_funcionalidad_orden_tabla(tabla); logger.debug(f"Tabla '{tabla_nombre}' sin columnas usables."); return
+        
+        tabla["columns"]=tuple(cols_para_usar_en_tabla)
+        for c in cols_para_usar_en_tabla:
             tabla.heading(c,text=str(c),anchor=tk.W)
             try:
-                ancho_contenido = datos[c].astype(str).str.len().quantile(0.95) if not datos[c].empty else 0
+                # Asegurarse que la columna 'c' exista en 'datos' antes de accederla
+                if c in datos.columns:
+                    ancho_contenido = datos[c].astype(str).str.len().quantile(0.95) if not datos[c].empty else 0
+                else: # Columna 'c' no está en los datos, usar ancho por defecto
+                    ancho_contenido = 0 
                 ancho_cabecera = len(str(c)); ancho = max(70, min(int(max(ancho_cabecera * 7, ancho_contenido * 5.5) + 15), 350))
-            except: ancho = 100
+            except Exception as e_ancho: 
+                logger.warning(f"Error calculando ancho para columna '{c}' en tabla '{tabla_nombre}': {e_ancho}")
+                ancho = 100 # Ancho por defecto en caso de error
             tabla.column(c,anchor=tk.W,width=ancho,minwidth=50)
-        df_iterar=datos[cols_usar];num_filas_original=len(df_iterar)
+        
+        df_iterar = datos[cols_para_usar_en_tabla] 
+        num_filas_original=len(df_iterar) 
         mostrar_todo_por_resaltado = is_dicc and indices_a_resaltar and num_filas_original > 0
         if not mostrar_todo_por_resaltado and limite_filas and num_filas_original > limite_filas: df_iterar=df_iterar.head(limite_filas)
         elif mostrar_todo_por_resaltado: logger.debug(f"Mostrando todas {num_filas_original} filas de '{tabla_nombre}' por resaltado.")
@@ -875,6 +943,7 @@ class InterfazGrafica(tk.Tk):
             try: tabla.insert("","end",values=vals,tags=tuple(tags),iid=f"row_{idx}")
             except Exception as e_ins: logger.warning(f"Error insertando fila {idx} en '{tabla_nombre}': {e_ins}")
         self._configurar_funcionalidad_orden_tabla(tabla); logger.debug(f"Tabla '{tabla_nombre}' actualizada con {len(tabla.get_children())} filas visibles.")
+
     def _actualizar_etiquetas_archivos_cargados(self):
         max_l=25;dic_p=self.motor.archivo_diccionario_actual;desc_p=self.motor.archivo_descripcion_actual
         dic_n=dic_p.name if dic_p else "Ninguno";desc_n=desc_p.name if desc_p else "Ninguno"
@@ -890,7 +959,7 @@ class InterfazGrafica(tk.Tk):
             elif (self.origen_principal_resultados.es_directo_descripcion or self.origen_principal_resultados==OrigenResultados.DIRECTO_DESCRIPCION_VACIA) and self.desc_finales_de_ultima_busqueda is not None:salvar_ok=True
         self.btn_salvar_regla["state"]="normal" if salvar_ok else "disabled";self.btn_exportar["state"]="normal" if (self.resultados_actuales is not None and not self.resultados_actuales.empty) else "disabled"
 
-    def _cargar_diccionario_ui(self): # Ahora llamado por _try_except_wrapper
+    def _cargar_diccionario_ui(self):
         cfg_path=self.config.get("last_dic_path");init_dir=str(Path(cfg_path).parent) if cfg_path and Path(cfg_path).exists() else os.getcwd()
         ruta_seleccionada=filedialog.askopenfilename(title="Cargar Diccionario",filetypes=[("Excel","*.xlsx *.xls"),("Todos","*.*")],initialdir=init_dir)
         if not ruta_seleccionada: return
@@ -909,7 +978,7 @@ class InterfazGrafica(tk.Tk):
             self.title(f"Buscador - Dic: N/A (Error) | Desc: {desc_n_title}")
         self._actualizar_etiquetas_archivos_cargados();self._actualizar_estado_general_botones_y_controles()
 
-    def _cargar_excel_descripcion_ui(self): # Ahora llamado por _try_except_wrapper
+    def _cargar_excel_descripcion_ui(self):
         cfg_path=self.config.get("last_desc_path");init_dir=str(Path(cfg_path).parent) if cfg_path and Path(cfg_path).exists() else os.getcwd()
         ruta_seleccionada_str=filedialog.askopenfilename(title="Cargar Descripciones",filetypes=[("Excel","*.xlsx *.xls"),("Todos","*.*")],initialdir=init_dir)
         if not ruta_seleccionada_str: logger.info("Carga de descripciones cancelada."); return
@@ -930,7 +999,7 @@ class InterfazGrafica(tk.Tk):
             self.title(f"Buscador - Dic: {dic_n_title} | Desc: N/A (Error)")
         self._actualizar_etiquetas_archivos_cargados();self._actualizar_estado_general_botones_y_controles()
 
-    def _ejecutar_busqueda_ui(self): # Ahora llamado por _try_except_wrapper
+    def _ejecutar_busqueda_ui(self):
         if self.motor.datos_diccionario is None or self.motor.datos_descripcion is None:messagebox.showwarning("Archivos Faltantes","Cargue Diccionario y Descripciones.");return
         term_ui=self.texto_busqueda_var.get();self.ultimo_termino_buscado=term_ui
         self.resultados_actuales=None;self.fcds_de_ultima_busqueda=None;self.desc_finales_de_ultima_busqueda=None;self.origen_principal_resultados=OrigenResultados.NINGUNO;self.indices_fcds_resaltados=None
@@ -942,8 +1011,9 @@ class InterfazGrafica(tk.Tk):
             num_fcds_actual=len(self.indices_fcds_resaltados) if self.indices_fcds_resaltados else 0
             dicc_lbl=f"Diccionario ({len(self.motor.datos_diccionario)} filas)" + (f" - {num_fcds_actual} FCDs resaltados" if num_fcds_actual>0 and origen.es_via_diccionario and origen!=OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS else "")
             self.lbl_tabla_diccionario.config(text=dicc_lbl)
-            cols_prev_dic,_=self.motor._obtener_nombres_columnas_busqueda_df(self.motor.datos_diccionario,self.motor.indices_columnas_busqueda_dic_preview,"diccionario_preview")
-            self._actualizar_tabla_treeview_ui(self.tabla_diccionario,self.motor.datos_diccionario,limite_filas=None if self.indices_fcds_resaltados else 100,columnas_a_mostrar=cols_prev_dic,indices_a_resaltar=self.indices_fcds_resaltados)
+            cols_prev_dic_actual,_=self.motor._obtener_nombres_columnas_busqueda_df(self.motor.datos_diccionario,self.motor.indices_columnas_busqueda_dic_preview,"diccionario_preview")
+            limite_filas_dic_preview = None if self.indices_fcds_resaltados else 100
+            self._actualizar_tabla_treeview_ui(self.tabla_diccionario,self.motor.datos_diccionario,limite_filas=limite_filas_dic_preview,columnas_a_mostrar=cols_prev_dic_actual,indices_a_resaltar=self.indices_fcds_resaltados)
         if err_msg and origen.es_error_operacional:messagebox.showerror("Error Motor",f"Error interno: {err_msg}");self.resultados_actuales=pd.DataFrame(columns=df_desc_cols)
         elif origen.es_error_carga or origen.es_error_configuracion or origen.es_termino_invalido:messagebox.showerror("Error Búsqueda",err_msg or f"Error: {origen.name}");self.resultados_actuales=pd.DataFrame(columns=df_desc_cols)
         elif origen in [OrigenResultados.VIA_DICCIONARIO_CON_RESULTADOS_DESC, OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC]:
@@ -951,14 +1021,14 @@ class InterfazGrafica(tk.Tk):
         elif origen==OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS:
             self.resultados_actuales=res_df ;self._actualizar_mensaje_barra_estado(f"'{term_ui}': No en Diccionario.");
             if messagebox.askyesno("Búsqueda Alternativa",f"'{term_ui}' no encontrado en Diccionario.\n\n¿Buscar '{term_ui}' directamente en Descripciones?"):
-                self._try_except_wrapper(self._buscar_directo_en_descripciones_y_actualizar_ui, term_ui, df_desc_cols) # Envuelto
+                self._try_except_wrapper(self._buscar_directo_en_descripciones_y_actualizar_ui, term_ui, df_desc_cols)
             else: self._actualizar_estado_general_botones_y_controles()
         elif origen in [OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC, OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS, OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC]:
             self.resultados_actuales=res_df;num_fcds_i=len(fcds) if fcds is not None else 0;msg_fcd_i=f"{num_fcds_i} en Diccionario"
             msg_desc_i="pero no se extrajeron términos válidos para Desc." if origen in [OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS, OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC] else "pero 0 resultados en Desc."
             self._actualizar_mensaje_barra_estado(f"'{term_ui}': {msg_fcd_i}, {msg_desc_i.replace('.','')} en Desc.")
             if messagebox.askyesno("Búsqueda Alternativa",f"{msg_fcd_i} para '{term_ui}', {msg_desc_i}\n\n¿Buscar '{term_ui}' directamente en Descripciones?"):
-                self._try_except_wrapper(self._buscar_directo_en_descripciones_y_actualizar_ui, term_ui, df_desc_cols) # Envuelto
+                self._try_except_wrapper(self._buscar_directo_en_descripciones_y_actualizar_ui, term_ui, df_desc_cols)
             else: self._actualizar_estado_general_botones_y_controles()
         elif origen==OrigenResultados.DIRECTO_DESCRIPCION_CON_RESULTADOS:self.resultados_actuales=res_df;self._actualizar_mensaje_barra_estado(f"Búsqueda directa '{term_ui}': {len(res_df) if res_df is not None else 0} resultados.")
         elif origen==OrigenResultados.DIRECTO_DESCRIPCION_VACIA:
@@ -968,13 +1038,13 @@ class InterfazGrafica(tk.Tk):
         if self.resultados_actuales is None:self.resultados_actuales=pd.DataFrame(columns=df_desc_cols)
         self.desc_finales_de_ultima_busqueda=self.resultados_actuales.copy();self._actualizar_tabla_treeview_ui(self.tabla_resultados,self.resultados_actuales);self._actualizar_estado_general_botones_y_controles()
 
-    def _buscar_directo_en_descripciones_y_actualizar_ui(self, term_ui_original: str, columnas_df_desc_referencia: List[str]): # Llamado por wrapper
+    def _buscar_directo_en_descripciones_y_actualizar_ui(self, term_ui_original: str, columnas_df_desc_referencia: List[str]):
         self._actualizar_mensaje_barra_estado(f"Iniciando búsqueda directa de '{term_ui_original}' en descripciones...")
         self.indices_fcds_resaltados = None
         if self.motor.datos_diccionario is not None:
             cols_prev_dic_alt,_ = self.motor._obtener_nombres_columnas_busqueda_df(self.motor.datos_diccionario, self.motor.indices_columnas_busqueda_dic_preview, "diccionario_preview")
             self.lbl_tabla_diccionario.config(text=f"Vista Previa Diccionario ({len(self.motor.datos_diccionario)} filas)")
-            self._actualizar_tabla_treeview_ui(self.tabla_diccionario, self.motor.datos_diccionario, limite_filas=100, columnas_a_mostrar_ordenadas=cols_prev_dic_alt, indices_a_resaltar=None)
+            self._actualizar_tabla_treeview_ui(self.tabla_diccionario, self.motor.datos_diccionario, limite_filas=100, columnas_a_mostrar=cols_prev_dic_alt, indices_a_resaltar=None)
         res_df_dir, orig_dir, _, _, msg_error_directo = self.motor.buscar(termino_busqueda_original=term_ui_original, buscar_via_diccionario_flag=False)
         self.origen_principal_resultados = orig_dir; self.fcds_de_ultima_busqueda = None
         if msg_error_directo and (orig_dir.es_error_operacional or orig_dir.es_termino_invalido):
@@ -989,7 +1059,7 @@ class InterfazGrafica(tk.Tk):
         self._actualizar_tabla_treeview_ui(self.tabla_resultados, self.resultados_actuales)
         self._actualizar_estado_general_botones_y_controles()
 
-    def _salvar_regla_actual_ui(self): # Llamado por wrapper
+    def _salvar_regla_actual_ui(self):
         origen_nombre = self.origen_principal_resultados.name
         if not self.ultimo_termino_buscado and not (self.origen_principal_resultados == OrigenResultados.DIRECTO_DESCRIPCION_VACIA and self.desc_finales_de_ultima_busqueda is not None): messagebox.showerror("Error Salvar", "No hay búsqueda para salvar."); return
         df_salvar: Optional[pd.DataFrame] = None; tipo_datos = "DESCONOCIDO"
@@ -1006,12 +1076,11 @@ class InterfazGrafica(tk.Tk):
         else: messagebox.showwarning("Nada que Salvar", "No hay datos claros para salvar.")
         self._actualizar_estado_general_botones_y_controles()
 
-    def _exportar_resultados_ui(self): # Llamado por wrapper
+    def _exportar_resultados_ui(self):
         if self.resultados_actuales is None or self.resultados_actuales.empty: messagebox.showinfo("Exportar", "No hay resultados para exportar."); return
         nombre_archivo_sugerido = f"resultados_{pd.Timestamp.now():%Y%m%d_%H%M%S}"
         ruta = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx"), ("CSV", "*.csv")], title="Guardar resultados", initialfile=nombre_archivo_sugerido)
         if not ruta: return
-        # El try-except principal ahora está en el wrapper
         if ruta.endswith(".xlsx"): self.resultados_actuales.to_excel(ruta, index=False)
         elif ruta.endswith(".csv"): self.resultados_actuales.to_csv(ruta, index=False, encoding='utf-8-sig')
         else: messagebox.showerror("Error Formato", "Usar .xlsx o .csv."); return
@@ -1055,25 +1124,20 @@ class InterfazGrafica(tk.Tk):
             self._guardar_configuracion_app()
             self.destroy()
         except Exception as e:
-            func_name = "on_closing_app"
-            error_type = type(e).__name__
-            error_msg = str(e)
-            tb_str = traceback.format_exc()
+            func_name = "on_closing_app"; error_type = type(e).__name__; error_msg = str(e); tb_str = traceback.format_exc()
             logger.critical(f"Error en {func_name}: {error_type} - {error_msg}\n{tb_str}")
             print(f"--- TRACEBACK COMPLETO (desde {func_name}) ---\n{tb_str}")
-            # No mostramos messagebox aquí porque la app ya se está cerrando, podría ser problemático.
-            self.destroy() # Intenta destruir de todas formas
-
+            self.destroy()
 
 # --- Punto de Entrada Principal de la Aplicación ---
 if __name__ == "__main__":
-    LOG_FILE_NAME = "Buscador_Avanzado_App_v1.8.log"
+    LOG_FILE_NAME = "Buscador_Avanzado_App_v1.9.log" # Versión con parseo numérico mejorado
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(funcName)s() - %(message)s",
         handlers=[logging.FileHandler(LOG_FILE_NAME, encoding="utf-8", mode="w"), logging.StreamHandler()])
     root_logger = logging.getLogger()
-    root_logger.info(f"--- Iniciando Buscador Avanzado v1.8 (AND Secuencial Depurado) (Script: {Path(__file__).name}) ---")
+    root_logger.info(f"--- Iniciando Buscador Avanzado v1.9 (Parseo Num Mejorado) (Script: {Path(__file__).name}) ---")
     root_logger.info(f"Logs siendo guardados en: {Path(LOG_FILE_NAME).resolve()}")
 
     dependencias_faltantes_main: List[str] = []
