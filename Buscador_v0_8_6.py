@@ -79,18 +79,28 @@ class ExtractorMagnitud:
 
     def __init__(self, mapeo_magnitudes: Optional[Dict[str, List[str]]] = None):
         self.sinonimo_a_canonico_normalizado: Dict[str, str] = {}
+        # Utiliza el mapeo proporcionado o el predefinido (que está vacío por defecto).
         mapeo_a_usar = mapeo_magnitudes if mapeo_magnitudes is not None else self.MAPEO_MAGNITUDES_PREDEFINIDO
-        for forma_canonica, lista_sinonimos in mapeo_a_usar.items():
-            canonico_norm = self._normalizar_texto(forma_canonica)
-            if not canonico_norm:
-                logger.warning(f"Forma canónica '{forma_canonica}' vacía tras normalizar en ExtractorMagnitud.")
+        
+        # Itera sobre el mapeo para construir el diccionario interno normalizado.
+        # La clave del mapeo_a_usar es la forma canónica, y el valor es una lista de sus sinónimos.
+        for forma_canonica_original, lista_sinonimos_originales in mapeo_a_usar.items():
+            # Normaliza la forma canónica.
+            canonico_norm = self._normalizar_texto(forma_canonica_original)
+            if not canonico_norm: # Si la forma canónica es inválida después de normalizar, la ignora.
+                logger.warning(f"Forma canónica '{forma_canonica_original}' resultó vacía tras normalizar y fue ignorada en ExtractorMagnitud.")
                 continue
+            
+            # Mapea la forma canónica normalizada a sí misma.
             self.sinonimo_a_canonico_normalizado[canonico_norm] = canonico_norm
-            for sinonimo in lista_sinonimos:
-                sinonimo_norm = self._normalizar_texto(sinonimo)
-                if sinonimo_norm:
+            
+            # Procesa y mapea cada sinónimo a la forma canónica normalizada.
+            for sinonimo_original in lista_sinonimos_originales:
+                sinonimo_norm = self._normalizar_texto(str(sinonimo_original)) # Asegura que sea string
+                if sinonimo_norm: # Si el sinónimo es válido después de normalizar.
                     self.sinonimo_a_canonico_normalizado[sinonimo_norm] = canonico_norm
-        logger.debug(f"ExtractorMagnitud inicializado con {len(self.sinonimo_a_canonico_normalizado)} mapeos normalizados.")
+        logger.debug(f"ExtractorMagnitud inicializado/actualizado con {len(self.sinonimo_a_canonico_normalizado)} mapeos normalizados.")
+
 
     @staticmethod
     def _normalizar_texto(texto: str) -> str:
@@ -145,31 +155,96 @@ class MotorBusqueda:
         self.patron_rango = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*-\s*(\d+(?:[.,]\d+)?)\s*([a-zA-ZáéíóúÁÉÍÓÚñÑµΩ\.\/\-\_]+)?\s*$")
         self.patron_termino_negado = re.compile(r'#\s*(?:\"([^\"]+)\"|([a-zA-ZáéíóúÁÉÍÓÚñÑ0-9\.\-\_]+))', re.IGNORECASE | re.UNICODE)
         self.patron_num_unidad_df = re.compile(r"(\d+(?:[.,]\d+)?)[\s\-]*([a-zA-ZáéíóúÁÉÍÓÚñÑµΩ\.\/\-\_]+)?")
-        self.extractor_magnitud = ExtractorMagnitud()
+        self.extractor_magnitud = ExtractorMagnitud() # Se inicializa con el mapeo predefinido (vacío)
 
     def cargar_excel_diccionario(self, ruta_str: str) -> Tuple[bool, Optional[str]]:
+        """
+        Carga el archivo Excel que actúa como "diccionario" de términos (FCDs).
+        Actualiza el ExtractorMagnitud con las formas canónicas y sinónimos del diccionario.
+        """
         ruta = Path(ruta_str)
         df_cargado, error_msg_carga = ManejadorExcel.cargar_excel(ruta)
+
         if df_cargado is None:
-            self.datos_diccionario = None; self.archivo_diccionario_actual = None
+            self.datos_diccionario = None
+            self.archivo_diccionario_actual = None
+            self.extractor_magnitud = ExtractorMagnitud() # Resetear a predefinido si falla la carga
             return False, error_msg_carga
-        if df_cargado.shape[1] > 0:
-            col0_vals = df_cargado.iloc[:, 0].dropna().astype(str).unique()
-            mapeo_dinamico_para_extractor: Dict[str, List[str]] = {}
-            for val_raw in col0_vals:
-                val_limpio = val_raw.strip()
-                if val_limpio: mapeo_dinamico_para_extractor[val_limpio] = [val_limpio]
+
+        # Construir mapeo para ExtractorMagnitud
+        mapeo_dinamico_para_extractor: Dict[str, List[str]] = {}
+        
+        # Asumir que la primera columna (índice 0) es la forma canónica de la unidad/término.
+        # Asumir que las columnas desde el índice 3 (cuarta columna) en adelante pueden ser sinónimos.
+        # Esto debe coincidir con la estructura real de tu archivo "Diccionario_ACCESO draft vX.X.xlsx".
+        if df_cargado.shape[1] > 0: # El DF debe tener al menos la columna canónica.
+            columna_canonica_nombre = df_cargado.columns[0]
+            # Determinar columnas de sinónimos (ej. de la 4ta hasta la 14ava, o hasta que no haya más)
+            # Para el ejemplo del log: SINONIMOS (idx 3), Unnamed: 4 (idx 4) ... Unnamed: 13 (idx 13)
+            # Usaremos un rango de índices que parece cubrir tus columnas de sinónimos.
+            # Puedes ajustar estos índices si la estructura de tu Excel cambia.
+            inicio_col_sinonimos = 3 
+            # Definimos un máximo de columnas de sinónimos a leer para evitar errores si hay muchas columnas inesperadas.
+            # O podríamos iterar todas las columnas restantes si se prefiere.
+            max_cols_a_chequear_para_sinonimos = df_cargado.shape[1] # Chequear todas las columnas restantes
+                                                                    # después de la columna canónica y las intermedias (concepto, tipo)
+
+            for _, fila in df_cargado.iterrows():
+                forma_canonica_raw = fila[columna_canonica_nombre]
+                if pd.isna(forma_canonica_raw) or str(forma_canonica_raw).strip() == "":
+                    continue # Saltar si la forma canónica está vacía
+
+                # La forma canónica también es un sinónimo de sí misma.
+                # El extractor se encarga de normalizarla internamente.
+                forma_canonica_str = str(forma_canonica_raw).strip()
+                
+                # Lista para almacenar todos los sinónimos de esta forma canónica.
+                # ExtractorMagnitud normalizará estos al inicializarse.
+                sinonimos_para_esta_canonica: List[str] = [forma_canonica_str] 
+
+                # Iterar sobre las columnas designadas como sinónimos
+                for i in range(inicio_col_sinonimos, max_cols_a_chequear_para_sinonimos):
+                    if i < df_cargado.shape[1]: # Asegurar que el índice de columna es válido
+                        sinonimo_celda_raw = fila[df_cargado.columns[i]]
+                        if pd.notna(sinonimo_celda_raw) and str(sinonimo_celda_raw).strip() != "":
+                            sinonimos_para_esta_canonica.append(str(sinonimo_celda_raw).strip())
+                
+                # Añadir al mapeo. ExtractorMagnitud manejará la normalización y evitará duplicados
+                # si la misma forma canónica (normalizada) aparece múltiples veces.
+                # Lo correcto es que la *clave* del mapeo sea la forma canónica original (o normalizada)
+                # y el *valor* la lista de sinónimos originales (o normalizados).
+                # El constructor de ExtractorMagnitud se encarga de la normalización interna.
+                forma_canonica_clave_para_mapeo = self.extractor_magnitud._normalizar_texto(forma_canonica_str)
+                if forma_canonica_clave_para_mapeo:
+                    # Si la forma canónica ya existe, extendemos su lista de sinónimos (evitando duplicados)
+                    # La lógica de ExtractorMagnitud ya lo hace internamente al construir sinonimo_a_canonico_normalizado
+                    # Aquí, simplemente pasamos la lista completa de sinónimos para esta canónica.
+                    # Si una forma canónica aparece múltiples veces, la última definición de sinónimos para esa canónica prevalecerá.
+                    # Para un mejor manejo de duplicados de formas canónicas, se podría acumular.
+                    # Pero para el ExtractorMagnitud, él mapea cada sinónimo normalizado a una única canónica normalizada.
+                    # Lo importante es que cada sinónimo se asocie a su canónica correcta.
+                    mapeo_dinamico_para_extractor[forma_canonica_str] = list(set(sinonimos_para_esta_canonica)) # Usar set para eliminar duplicados de la lista de sinónimos.
+
+
             if mapeo_dinamico_para_extractor:
                 self.extractor_magnitud = ExtractorMagnitud(mapeo_magnitudes=mapeo_dinamico_para_extractor)
-                logger.info(f"Extractor de magnitudes actualizado dinámicamente desde la primera columna de '{ruta.name}'.")
-            else: logger.warning(f"La primera columna de '{ruta.name}' no contenía valores válidos para actualizar el extractor de magnitudes.")
-        else: logger.warning(f"El archivo de diccionario '{ruta.name}' no tiene columnas.")
-        self.datos_diccionario = df_cargado; self.archivo_diccionario_actual = ruta
+                logger.info(f"Extractor de magnitudes actualizado desde '{ruta.name}' usando formas canónicas y sinónimos.")
+            else:
+                logger.warning(f"No se extrajeron mapeos de unidad válidos desde '{ruta.name}'. ExtractorMagnitud usará su predefinido (si existe) o estará vacío.")
+                self.extractor_magnitud = ExtractorMagnitud() # Resetear a predefinido si no se cargó nada
+        else:
+            logger.warning(f"El archivo de diccionario '{ruta.name}' no tiene columnas. No se pudo actualizar el extractor de magnitudes.")
+            self.extractor_magnitud = ExtractorMagnitud() # Resetear
+
+        self.datos_diccionario = df_cargado
+        self.archivo_diccionario_actual = ruta
+
         if logger.isEnabledFor(logging.DEBUG) and self.datos_diccionario is not None:
             logger.debug(f"Archivo de diccionario '{ruta.name}' cargado (primeras 3 filas):\n{self.datos_diccionario.head(3).to_string()}")
         return True, None
 
     def cargar_excel_descripcion(self, ruta_str: str) -> Tuple[bool, Optional[str]]:
+        # ... (sin cambios en esta función)
         ruta = Path(ruta_str)
         df_cargado, error_msg_carga = ManejadorExcel.cargar_excel(ruta)
         if df_cargado is None:
@@ -180,6 +255,7 @@ class MotorBusqueda:
         return True, None
 
     def _obtener_nombres_columnas_busqueda_df(self, df: pd.DataFrame, indices_cfg: List[int], tipo_busqueda: str) -> Tuple[Optional[List[str]], Optional[str]]:
+        # ... (sin cambios en esta función)
         if df is None or df.empty: return None, f"DF para '{tipo_busqueda}' vacío."
         columnas_disponibles = list(df.columns); num_cols_df = len(columnas_disponibles)
         if num_cols_df == 0: return None, f"DF '{tipo_busqueda}' sin columnas."
@@ -203,6 +279,7 @@ class MotorBusqueda:
         return nombres_columnas_seleccionadas, None
 
     def _normalizar_para_busqueda(self, texto: str) -> str:
+        # ... (sin cambios en esta función)
         if not isinstance(texto, str) or not texto: return ""
         try:
             texto_upper = texto.upper()
@@ -215,6 +292,7 @@ class MotorBusqueda:
             return str(texto).upper().strip()
 
     def _aplicar_negaciones_y_extraer_positivos(self, df_original: pd.DataFrame, cols: List[str], texto: str) -> Tuple[pd.DataFrame, str, List[str]]:
+        # ... (sin cambios en esta función)
         texto_limpio_entrada = texto.strip(); terminos_negados_encontrados: List[str] = []
         df_a_procesar = df_original.copy() if df_original is not None else pd.DataFrame()
         if not texto_limpio_entrada: return df_a_procesar, "", terminos_negados_encontrados
@@ -249,38 +327,16 @@ class MotorBusqueda:
         return df_resultado_filtrado, terminos_positivos_final_str, terminos_negados_encontrados
 
     def _descomponer_nivel1_or(self, texto_complejo: str) -> Tuple[str, List[str]]:
+        # ... (MODIFICADO para ya no tratar '/' como OR)
         texto_limpio = texto_complejo.strip();
         if not texto_limpio: return "OR", []
-        # Si contiene '+' y no está encapsulado por un par de paréntesis balanceados que lo contengan todo,
-        # entonces el '+' es de mayor precedencia para este nivel de parseo.
-        # Ejemplo: "A + B | C" -> AND primero si no hay paréntesis. "(A+B) | C" -> OR primero.
-        # Esta función es para el primer nivel de parseo, buscando ORs de alto nivel.
-        # Si la query es "(X|Y) + (Z|W)", esta función debería devolver "AND", ["(X|Y) + (Z|W)"]
-        # porque no hay un OR de nivel superior que separe esos dos bloques.
-        
-        # Heurística simple: si hay un '+' y no es una frase como "(A+B)", el '+' domina.
-        # Esto asume que los ORs están DENTRO de los operandos de un AND, o que no hay ANDs.
-        if '+' in texto_limpio:
-            # Si la query entera está entre paréntesis y contiene un OR, ej: "(A | B)"
-            # y esta función es llamada DESPUÉS de que un split por '+' la haya aislado,
-            # entonces debe procesar el OR interno.
-            # Pero si es el primer parseo de, ej: "X + (A|B)", el '+' es más fuerte.
-            # La lógica actual de _procesar_busqueda_en_df_objetivo llama a _descomponer_nivel1_or
-            # para la query completa, y luego _descomponer_nivel2_and para los segmentos.
-            # Para la query `(A|B) + (C|D)`, _descomponer_nivel1_or debería devolverla como un bloque AND.
-            # Si el término es solo `(A|B)`, entonces sí debe devolver un OR.
-            
-            # Si el texto NO empieza con '(' y termina con ')' O si, empezando y terminando con '()',
-            # aún contiene '+' FUERA de otros paréntesis internos, entonces es un AND.
-            # Esto es complejo de parsear con regex simples.
-            # Por ahora, mantenemos la lógica anterior, ya que el filtrado secuencial para AND
-            # en `buscar()` hace que esta función solo reciba queries OR simples o términos simples.
-            pass # No se cambia la lógica de esta función, se asume que recibe queries OR simples.
+        if '+' in texto_limpio and not (texto_limpio.startswith("(") and texto_limpio.endswith(")")):
+             logger.debug(f"Descomp. N1 (OR) para '{texto_complejo}': Detectado '+' de alto nivel, tratando como AND. Segmento=['{texto_limpio}']")
+             return "AND", [texto_limpio]
 
-
-        separadores_or = [(r"\s*\|\s*", "|"), (r"\s*/\s*", "/")]
+        separadores_or = [(r"\s*\|\s*", "|")] # <-- '/' ELIMINADO DE AQUÍ
         for sep_regex, sep_char_literal in separadores_or:
-            if sep_char_literal in texto_limpio:
+            if '+' not in texto_complejo and sep_char_literal in texto_limpio:
                 segmentos_potenciales = [s.strip() for s in re.split(sep_regex, texto_limpio) if s.strip()]
                 if len(segmentos_potenciales) > 1 or (len(segmentos_potenciales) == 1 and texto_limpio != segmentos_potenciales[0]):
                     logger.debug(f"Descomp. N1 (OR) para '{texto_complejo}': Op=OR, Segs={segmentos_potenciales}")
@@ -289,6 +345,7 @@ class MotorBusqueda:
         return "AND", [texto_limpio]
 
     def _descomponer_nivel2_and(self, termino_segmento_n1: str) -> Tuple[str, List[str]]:
+        # ... (sin cambios en esta función)
         termino_limpio = termino_segmento_n1.strip();
         if not termino_limpio: return "AND", []
         partes_crudas = re.split(r'\s+\+\s+', termino_limpio)
@@ -297,27 +354,24 @@ class MotorBusqueda:
         return "AND", partes_limpias_finales
 
     def _analizar_terminos(self, terminos_brutos: List[str]) -> List[Dict[str, Any]]:
+        # ... (sin cambios en esta función, pero _parse_numero que llama sí cambió)
         terminos_analizados: List[Dict[str, Any]] = []
         for termino_original_bruto in terminos_brutos:
             termino_original_procesado = str(termino_original_bruto).strip()
             es_frase_exacta = False
             termino_final_para_analisis = termino_original_procesado
-
             if len(termino_final_para_analisis) >= 2 and \
                termino_final_para_analisis.startswith('"') and \
                termino_final_para_analisis.endswith('"'):
                 termino_final_para_analisis = termino_final_para_analisis[1:-1]
                 es_frase_exacta = True
-
             if not termino_final_para_analisis: continue
-
             item_analizado: Dict[str, Any] = {"original": termino_final_para_analisis}
             match_comparacion = self.patron_comparacion.match(termino_final_para_analisis)
             match_rango = self.patron_rango.match(termino_final_para_analisis)
-
             if match_comparacion and not es_frase_exacta:
                 operador_str, valor_str, unidad_str_raw = match_comparacion.groups()
-                valor_numerico = self._parse_numero(valor_str)
+                valor_numerico = self._parse_numero(valor_str) # <--- LLAMA A _parse_numero MODIFICADO
                 if valor_numerico is not None:
                     mapa_operadores = {">": "gt", "<": "lt", ">=": "ge", "<=": "le", "=": "eq"}
                     unidad_canonica: Optional[str] = None
@@ -326,7 +380,7 @@ class MotorBusqueda:
                 else: item_analizado.update({"tipo": "str", "valor": self._normalizar_para_busqueda(termino_final_para_analisis)})
             elif match_rango and not es_frase_exacta:
                 valor1_str, valor2_str, unidad_str_r_raw = match_rango.groups()
-                valor1_num = self._parse_numero(valor1_str); valor2_num = self._parse_numero(valor2_str)
+                valor1_num = self._parse_numero(valor1_str); valor2_num = self._parse_numero(valor2_str) # <--- LLAMA A _parse_numero MODIFICADO
                 if valor1_num is not None and valor2_num is not None:
                     unidad_canonica_r: Optional[str] = None
                     if unidad_str_r_raw and unidad_str_r_raw.strip(): unidad_canonica_r = self.extractor_magnitud.obtener_magnitud_normalizada(unidad_str_r_raw.strip())
@@ -342,72 +396,75 @@ class MotorBusqueda:
         """
         Convierte una cadena que representa un número a float,
         manejando comas como decimales y puntos como miles según la regla de 3+ dígitos.
+        Ej: "10.000" -> 10000.0; "10,00" -> 10.0; "1.234,56" -> 1234.56
         """
-        if isinstance(num_str, (int, float)):
+        if isinstance(num_str, (int, float)): # Si ya es numérico, lo devuelve como float.
             return float(num_str)
-        if not isinstance(num_str, str):
+        if not isinstance(num_str, str): # Si no es un string, no se puede parsear.
             return None
 
-        s_limpio = num_str.strip()
-        if not s_limpio:
+        s_limpio = num_str.strip() # Limpia espacios al inicio/final.
+        if not s_limpio: # Si está vacío después de limpiar, retorna None.
             return None
 
         # Paso 1: Normalizar comas a puntos para un manejo uniforme de puntos.
-        s_con_puntos = s_limpio.replace(',', '.')
-
-        # Paso 2: Dividir por puntos para analizar los segmentos.
-        partes = s_con_puntos.split('.')
+        partes = con_coma = s_limpio.split(',')
+        
+    
 
         try:
             if len(partes) == 1:
-                # No hay puntos (o era originalmente un entero sin comas).
-                # Ej: "100", "10000" (proveniente de "10,000" o "10.000" ya procesados por el replace si la lógica fuera diferente)
-                # Con la lógica actual de replace arriba, si era "10.000", aquí partes sería ["10000"]
-                # si el replace de puntos se hiciera primero.
-                # Con la lógica actual `s_con_puntos = s_limpio.replace(',', '.')`
-                # "100" -> ["100"]
-                # "10.000" -> ["10", "000"]
-                # "10,00" -> ["10", "00"]
+                # No hay puntos, o era originalmente un entero sin comas (ej. "100")
+                logger.debug(f"Parseo num: '{num_str}' -> '{con_coma}' -> partes={partes}. Caso entero/simple float.")
                 return float(partes[0])
             
             # len(partes) > 1, significa que hay al menos un punto.
             ultima_parte = partes[-1]
-            partes_principales_str = "".join(partes[:-1]) # Todo excepto el último segmento, sin puntos intermedios.
+            partes_principales_str = "".join(partes[:-1])
 
-            # Aplicar la regla de los 3+ dígitos para el último segmento
-            if ultima_parte.isdigit():
+            if ultima_parte.isdigit(): # Verifica si la última parte es completamente numérica.
                 if len(ultima_parte) >= 3:
                     # El último punto (y todos los anteriores) se consideran separadores de miles.
                     # Se unen todas las partes (incluida la última) sin ningún punto.
-                    numero_reconstruido_str = "".join(partes)
-                    logger.debug(f"Parseo num: '{num_str}' -> '{s_con_puntos}' -> partes={partes}. Última parte '{ultima_parte}' (>=3 dig) -> miles. Reconstruido: '{numero_reconstruido_str}'")
+                    numero_reconstruido_str = "".join(partes) # Ej: "10", "000" -> "10000"
+                    logger.debug(f"Parseo num: '{num_str}' -> '{con_coma}' -> partes={partes}. Última parte '{ultima_parte}' (>=3 dig) -> miles. Reconstruido: '{numero_reconstruido_str}'")
                     return float(numero_reconstruido_str)
                 elif len(ultima_parte) == 1 or len(ultima_parte) == 2 :
                     # El último punto es un separador decimal.
                     # Las partes principales (concatenadas sin puntos) forman la parte entera.
-                    numero_reconstruido_str = f"{partes_principales_str}.{ultima_parte}"
-                    logger.debug(f"Parseo num: '{num_str}' -> '{s_con_puntos}' -> partes={partes}. Última parte '{ultima_parte}' (1-2 dig) -> decimal. Reconstruido: '{numero_reconstruido_str}'")
+                    numero_reconstruido_str = f"{partes_principales_str}.{ultima_parte}" # Ej: "10" + "." + "00" -> "10.00"
+                    logger.debug(f"Parseo num: '{num_str}' -> '{con_coma}' -> partes={partes}. Última parte '{ultima_parte}' (1-2 dig) -> decimal. Reconstruido: '{numero_reconstruido_str}'")
                     return float(numero_reconstruido_str)
-                else: # len(ultima_parte) == 0 (ej: "10.") o no es dígito (regex debería prevenir esto)
-                    if not ultima_parte: # Si num_str era "10." o "1.234."
-                        logger.debug(f"Parseo num: '{num_str}' -> '{s_con_puntos}' -> partes={partes}. Última parte vacía. Reconstruido: '{partes_principales_str}'")
-                        return float(partes_principales_str) # "10" o "1234"
-                    else: # Última parte no es dígito y no vacía (ej. "10.A") - debería ser filtrado por regex antes.
-                        logger.warning(f"Parseo num: Formato de última parte no reconocido '{ultima_parte}' de '{num_str}'.")
+                else: # len(ultima_parte) == 0 (ej: num_str era "10." o "1.234.")
+                    if not ultima_parte: # El string original terminaba en un punto.
+                        if partes_principales_str.isdigit(): # Asegurarse que lo que queda es un número
+                           logger.debug(f"Parseo num: '{num_str}' -> '{con_coma}' -> partes={partes}. Última parte vacía. Reconstruido: '{partes_principales_str}'")
+                           return float(partes_principales_str) # "10." -> 10.0 ; "1.234." -> 1234.0
+                        else:
+                           logger.warning(f"Parseo num: Formato no reconocido tras quitar punto final para '{num_str}'. Parte principal: '{partes_principales_str}'")
+                           return None
+                    else: # Última parte es dígito pero de longitud 0 (imposible) o no reconocida
+                        logger.warning(f"Parseo num: Formato de última parte '{ultima_parte}' no reconocido para '{num_str}'.")
                         return None
             else: # Última parte no es enteramente dígitos (ej. "10.5V" si regex falló, o "10.A5")
-                logger.warning(f"Parseo num: Última parte '{ultima_parte}' de '{num_str}' no es puramente numérica.")
-                # Intento de fallback si la cadena original era simple y válida para float()
-                if s_con_puntos.count('.') == 1 and s_con_puntos.replace('.', '', 1).isdigit():
-                     logger.debug(f"Parseo num: Fallback para '{s_con_puntos}' como decimal simple.")
-                     return float(s_con_puntos)
+                logger.warning(f"Parseo num: Última parte '{ultima_parte}' de '{num_str}' (procesado como '{con_coma}') no es puramente numérica.")
+                # Intento de fallback: si el string original (normalizado con comas a puntos) es directamente convertible
+                # Esto manejaría "10.5" donde el punto es decimal y no hay más puntos.
+                if con_coma.count('.') <= 1: # Solo si hay 0 o 1 punto en total
+                    try:
+                        val_fallback = float(con_coma)
+                        logger.debug(f"Parseo num: Fallback a conversión directa para '{con_coma}' -> {val_fallback}")
+                        return val_fallback
+                    except ValueError:
+                        logger.warning(f"Parseo num: Fallback falló para '{con_coma}'.")
+                        return None
                 return None
         except ValueError:
-            logger.warning(f"Parseo num: ValueError al convertir '{num_str}' (procesado como '{s_con_puntos}') a float.")
+            logger.warning(f"Parseo num: ValueError final al convertir '{num_str}' (procesado como '{con_coma}' o reconstruido) a float.")
             return None
 
-
     def _generar_mascara_para_un_termino(self, df: pd.DataFrame, cols: List[str], term_an: Dict[str, Any]) -> pd.Series:
+        # ... (sin cambios significativos aquí, ya que depende de _parse_numero)
         tipo_termino = term_an["tipo"]; valor_termino = term_an["valor"]; unidad_requerida_canonica = term_an.get("unidad_busqueda")
         mascara_total_termino = pd.Series(False, index=df.index)
         for nombre_columna in cols:
@@ -418,8 +475,8 @@ class MotorBusqueda:
                     if pd.isna(valor_celda_raw) or str(valor_celda_raw).strip() == "": continue
                     for match_num_unidad_celda in self.patron_num_unidad_df.finditer(str(valor_celda_raw)):
                         try:
-                            num_celda_str = match_num_unidad_celda.group(1) # String numérico extraído
-                            num_celda_val = self._parse_numero(num_celda_str) # Parseo mejorado
+                            num_celda_str = match_num_unidad_celda.group(1)
+                            num_celda_val = self._parse_numero(num_celda_str) # <-- Usa _parse_numero mejorado
                             u_c_raw = match_num_unidad_celda.group(2)
                             if num_celda_val is None: continue
                             u_c_canon = self.extractor_magnitud.obtener_magnitud_normalizada(u_c_raw.strip()) if u_c_raw and u_c_raw.strip() else None
@@ -436,7 +493,7 @@ class MotorBusqueda:
                             elif tipo_termino == "range" and ((valor_termino[0] <= num_celda_val or np.isclose(num_celda_val, valor_termino[0])) and \
                                                                (num_celda_val <= valor_termino[1] or np.isclose(num_celda_val, valor_termino[1]))): cond = True
                             if cond: mascara_columna_actual_numerica.at[indice_fila] = True; break
-                        except ValueError: continue # Error en _parse_numero ya debería retornar None
+                        except ValueError: continue
                 mascara_total_termino |= mascara_columna_actual_numerica
             elif tipo_termino == "str":
                 try:
@@ -450,6 +507,7 @@ class MotorBusqueda:
         return mascara_total_termino
 
     def _aplicar_mascara_combinada_para_segmento_and(self, df: pd.DataFrame, cols: List[str], term_an_seg: List[Dict[str, Any]]) -> pd.Series:
+        # ... (sin cambios significativos aquí, pero puede ser afectado por _parse_numero en _analizar_terminos)
         if df is None or df.empty or not cols: return pd.Series(False, index=df.index if df is not None else None)
         if not term_an_seg: return pd.Series(False, index=df.index)
         mascara_final = pd.Series(True, index=df.index)
@@ -470,6 +528,7 @@ class MotorBusqueda:
         return mascara_final
 
     def _combinar_mascaras_de_segmentos_or(self, lista_mascaras: List[pd.Series], df_idx_ref: Optional[pd.Index] = None) -> pd.Series:
+        # ... (sin cambios en esta función)
         if not lista_mascaras:
             return pd.Series(False, index=df_idx_ref) if df_idx_ref is not None else pd.Series(dtype=bool)
         idx_usar = df_idx_ref
@@ -478,7 +537,6 @@ class MotorBusqueda:
                 idx_usar = lista_mascaras[0].index
         if idx_usar is None or idx_usar.empty:
             return pd.Series(dtype=bool)
-
         mascara_final = pd.Series(False, index=idx_usar)
         for masc_seg in lista_mascaras:
             if masc_seg.empty: continue
@@ -490,6 +548,7 @@ class MotorBusqueda:
         return mascara_final
 
     def _procesar_busqueda_en_df_objetivo(self, df_obj: pd.DataFrame, cols_obj: List[str], termino_busqueda_original_para_este_df: str, terminos_negativos_adicionales: Optional[List[str]] = None) -> Tuple[pd.DataFrame, Optional[str]]:
+        # ... (sin cambios significativos aquí, pero afectado por _parse_numero vía _analizar_terminos)
         logger.debug(f"Proc. búsqueda DF: Query='{termino_busqueda_original_para_este_df}' en {len(cols_obj)} cols de DF ({len(df_obj)} filas). Neg. Adic: {terminos_negativos_adicionales}")
         df_despues_negaciones_query, terminos_positivos_de_query, terminos_negados_de_query = \
             self._aplicar_negaciones_y_extraer_positivos(df_obj, cols_obj, termino_busqueda_original_para_este_df)
@@ -519,9 +578,7 @@ class MotorBusqueda:
         if not terminos_positivos_final_para_parseo.strip():
             logger.debug(f"Sin términos positivos ('{terminos_positivos_final_para_parseo}'). Devolviendo DF post-negaciones ({len(df_actual_procesando)} filas).")
             return df_actual_procesando.copy(), None
-        
         operador_nivel1, segmentos_nivel1_or = self._descomponer_nivel1_or(terminos_positivos_final_para_parseo)
-        
         if not segmentos_nivel1_or:
             if termino_busqueda_original_para_este_df.strip() or terminos_positivos_final_para_parseo.strip():
                 msg_error_segmentos = f"Térm. positivo '{terminos_positivos_final_para_parseo}' (de '{termino_busqueda_original_para_este_df}') inválido post-OR."
@@ -530,7 +587,6 @@ class MotorBusqueda:
             else:
                 logger.debug("Query original y positiva post-negación vacías. Devolviendo DF post-negaciones.")
                 return df_actual_procesando.copy(), None
-        
         lista_mascaras_para_or: List[pd.Series] = []
         for segmento_or_actual in segmentos_nivel1_or:
             _operador_nivel2, terminos_brutos_nivel2_and = self._descomponer_nivel2_and(segmento_or_actual)
@@ -547,26 +603,23 @@ class MotorBusqueda:
             else:
                 mascara_para_segmento_or_actual = self._aplicar_mascara_combinada_para_segmento_and(df_actual_procesando, cols_obj, terminos_atomicos_analizados_and)
             lista_mascaras_para_or.append(mascara_para_segmento_or_actual)
-            
         if not lista_mascaras_para_or and not df_actual_procesando.empty :
             logger.error("Error interno: no se generaron máscaras OR a pesar de segmentos N1 y DF no vacío.")
             return pd.DataFrame(columns=df_actual_procesando.columns), "Error interno: no se generaron máscaras OR."
         elif not lista_mascaras_para_or and df_actual_procesando.empty:
             return df_actual_procesando.copy(), None
-
         mascara_final_df_objetivo = self._combinar_mascaras_de_segmentos_or(lista_mascaras_para_or, df_actual_procesando.index if not df_actual_procesando.empty else None)
-        
         if mascara_final_df_objetivo.empty and not df_actual_procesando.empty:
              df_resultado_final = pd.DataFrame(columns=df_actual_procesando.columns)
         elif mascara_final_df_objetivo.empty and df_actual_procesando.empty:
              df_resultado_final = df_actual_procesando.copy()
         else:
              df_resultado_final = df_actual_procesando[mascara_final_df_objetivo].copy()
-
         logger.debug(f"Resultado _procesar_busqueda_en_df_objetivo para '{termino_busqueda_original_para_este_df}': {len(df_resultado_final)} filas.")
         return df_resultado_final, None
 
     def _extraer_terminos_de_fila_completa(self, fila_df: pd.Series) -> Set[str]:
+        # ... (sin cambios en esta función)
         terminos_extraidos_de_fila: Set[str] = set()
         if fila_df is None or fila_df.empty: return terminos_extraidos_de_fila
         for valor_celda in fila_df.values:
@@ -581,6 +634,8 @@ class MotorBusqueda:
         return terminos_extraidos_de_fila
 
     def buscar(self, termino_busqueda_original: str, buscar_via_diccionario_flag: bool) -> Tuple[Optional[pd.DataFrame], OrigenResultados, Optional[pd.DataFrame], Optional[List[int]], Optional[str]]:
+        # ... (Lógica de AND secuencial ya implementada en la v1.8/v1.8.1 se mantiene) ...
+        # La modificación clave fue en _parse_numero y la lógica de carga de ExtractorMagnitud.
         logger.info(f"Motor.buscar INICIO: termino='{termino_busqueda_original}', via_dicc={buscar_via_diccionario_flag}")
         columnas_descripcion_ref = self.datos_descripcion.columns if self.datos_descripcion is not None else []
         df_vacio_para_descripciones = pd.DataFrame(columns=columnas_descripcion_ref)
@@ -603,10 +658,9 @@ class MotorBusqueda:
             _df_dummy, terminos_positivos_globales, terminos_negativos_globales = self._aplicar_negaciones_y_extraer_positivos(pd.DataFrame(), [], termino_busqueda_original)
             logger.info(f"Parseo global: Positivos='{terminos_positivos_globales}', Negativos Globales={terminos_negativos_globales}")
 
-            if "+" in terminos_positivos_globales: # --- INICIO DE LÓGICA MEJORADA PARA AND (+) ---
+            if "+" in terminos_positivos_globales:
                 logger.info(f"Detectada búsqueda AND en positivos globales: '{terminos_positivos_globales}'")
                 partes_and = [p.strip() for p in terminos_positivos_globales.split("+") if p.strip()]
-                
                 df_resultado_acumulado_desc = self.datos_descripcion.copy() if self.datos_descripcion is not None else pd.DataFrame(columns=columnas_descripcion_ref)
                 fcds_indices_acumulados = set()
                 todas_partes_and_produjeron_terminos_validos = True
@@ -616,7 +670,6 @@ class MotorBusqueda:
                 if self.datos_descripcion is None:
                      logger.error("Archivo de descripciones no cargado, no se puede proceder con búsqueda AND vía diccionario.")
                      return None, OrigenResultados.ERROR_CARGA_DESCRIPCION, None, None, "Descripciones no cargadas para búsqueda AND."
-
                 columnas_desc_para_filtrado, err_cols_desc_fil = self._obtener_nombres_columnas_busqueda_df(self.datos_descripcion, [], "descripcion_fcds")
                 if not columnas_desc_para_filtrado:
                     return None, OrigenResultados.ERROR_CONFIGURACION_COLUMNAS_DESC, None, None, err_cols_desc_fil
@@ -675,8 +728,7 @@ class MotorBusqueda:
                 
                 logger.info(f"Búsqueda AND '{terminos_positivos_globales}' vía diccionario produjo {len(resultados_desc_final_filtrado_and)} resultados en descripciones.")
                 return resultados_desc_final_filtrado_and, OrigenResultados.VIA_DICCIONARIO_CON_RESULTADOS_DESC, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
-            # --- FIN DE LÓGICA MEJORADA PARA AND (+) ---
-            else: # terminos_positivos_globales NO contiene '+', flujo original para queries simples/puramente negativas
+            else: 
                 origen_propuesto_flujo_simple: OrigenResultados = OrigenResultados.NINGUNO
                 fcds_query_simple: Optional[pd.DataFrame] = None
                 if terminos_positivos_globales.strip():
@@ -749,13 +801,15 @@ class MotorBusqueda:
             except Exception as e_desc_dir_proc:
                 logger.exception("Excepción búsqueda directa en descripciones."); return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, None, None, f"Error motor (desc directa): {e_desc_dir_proc}"
 
-# --- Interfaz Gráfica ---
+# --- Interfaz Gráfica (sin cambios significativos más allá del título y _parse_numero indirectamente) ---
+# ... (El resto de la clase InterfazGrafica y el bloque if __name__ == "__main__" se mantienen como en v1.8.1,
+#      solo actualizando el número de versión en el título y el nombre del archivo de log)
 class InterfazGrafica(tk.Tk):
-    CONFIG_FILE_NAME = "config_buscador_avanzado_ui.json"
+    CONFIG_FILE_NAME = "config_buscador_avanzado_ui.json" 
 
     def __init__(self):
         super().__init__()
-        self.title("Buscador Avanzado v1.9 (Parseo Num Mejorado)") # Versión actualizada
+        self.title("Buscador Avanzado v1.10 (Sinónimos Unidad Mejorados)") # Actualizado
         self.geometry("1250x800")
         self.config: Dict[str, Any] = self._cargar_configuracion_app()
         indices_cfg_preview_dic = self.config.get("indices_columnas_busqueda_dic_preview", [])
@@ -781,7 +835,7 @@ class InterfazGrafica(tk.Tk):
         self._actualizar_mensaje_barra_estado("Listo. Cargue Diccionario y Descripciones.")
         self._deshabilitar_botones_operadores()
         self._actualizar_estado_general_botones_y_controles()
-        logger.info(f"Interfaz Gráfica (v1.9 Parseo Num Mejorado) inicializada.")
+        logger.info(f"Interfaz Gráfica (v1.10 Sinónimos Unidad Mejorados) inicializada.")
 
     def _try_except_wrapper(self, func, *args, **kwargs):
         try:
@@ -846,7 +900,7 @@ class InterfazGrafica(tk.Tk):
     def _configurar_eventos_globales_app(self): self.entrada_busqueda.bind("<Return>",lambda e:self._try_except_wrapper(self._ejecutar_busqueda_ui));self.protocol("WM_DELETE_WINDOW",self.on_closing_app)
     def _actualizar_mensaje_barra_estado(self,m): self.barra_estado.config(text=m);logger.info(f"Mensaje UI (BarraEstado): {m}");self.update_idletasks()
     def _mostrar_ayuda_ui(self):
-        texto_ayuda = ("Sintaxis:\n- Texto: `router cisco`\n- AND: `tarjeta + 16 puertos`\n- OR: `modulo | SFP` o `modulo / SFP`\n"
+        texto_ayuda = ("Sintaxis:\n- Texto: `router cisco`\n- AND: `tarjeta + 16 puertos`\n- OR: `modulo | SFP` (Nota: `/` ya no es OR)\n"
                        "- Numérico: `>1000W`, `<50V`, `>=48A`, `<=10.5W`\n- Rango: `10-20V`\n- Frase: `\"rack 19\"`\n- Negación: `#palabra` o `# \"frase\"`\n\n"
                        "Flujo Vía Diccionario:\n1. Query 'A+B': Parte 'A' y 'B' se buscan individualmente en Diccionario (FCDs).\n"
                        "2. Sinónimos: De las FCDs de 'A' se extraen Sinónimos_A. De las FCDs de 'B' se extraen Sinónimos_B.\n"
@@ -869,19 +923,14 @@ class InterfazGrafica(tk.Tk):
         if df_copia.empty or col not in df_copia.columns: tabla.heading(col,command=lambda c=col,t=tabla:self._try_except_wrapper(self._ordenar_columna_tabla_ui,t,c,not rev));return
         df_num=pd.to_numeric(df_copia[col],errors='coerce')
         df_ord=df_copia.sort_values(by=col,ascending=not rev,na_position='last',key=(lambda x:pd.to_numeric(x,errors='coerce')) if not df_num.isna().all() else (lambda x:x.astype(str).str.lower()))
-        
-        # Corrección: Determinar las columnas para la tabla de diccionario
         columnas_para_diccionario_ordenado = None
         if tabla==self.tabla_diccionario and self.motor.datos_diccionario is not None:
+            # Obtener nombres de columna basados en los índices configurados, si existen, para la vista previa
+            # Esto asegura que se usen las mismas columnas que en la carga inicial si están definidas.
             columnas_para_diccionario_ordenado, _ = self.motor._obtener_nombres_columnas_busqueda_df(
-                df_ord, # Usar el df ordenado para mantener el orden de columnas si es posible
-                self.motor.indices_columnas_busqueda_dic_preview,
-                "diccionario_preview"
+                df_ord, self.motor.indices_columnas_busqueda_dic_preview, "diccionario_preview"
             )
-            if not columnas_para_diccionario_ordenado: # Fallback si no se obtienen
-                 columnas_para_diccionario_ordenado = list(df_ord.columns)
-
-
+            if not columnas_para_diccionario_ordenado: columnas_para_diccionario_ordenado = list(df_ord.columns)
         if tabla==self.tabla_diccionario:self._actualizar_tabla_treeview_ui(tabla,df_ord,limite_filas=None,columnas_a_mostrar=columnas_para_diccionario_ordenado, indices_a_resaltar=idx_resaltar)
         elif tabla==self.tabla_resultados:self.resultados_actuales=df_ord;self._actualizar_tabla_treeview_ui(tabla,self.resultados_actuales)
         tabla.heading(col,command=lambda c=col,t=tabla:self._try_except_wrapper(self._ordenar_columna_tabla_ui,t,c,not rev));self._actualizar_mensaje_barra_estado(f"Ordenado por '{col}'.")
@@ -890,50 +939,26 @@ class InterfazGrafica(tk.Tk):
         is_dicc=tabla==self.tabla_diccionario; tabla_nombre = "Diccionario" if is_dicc else "Resultados"
         [tabla.delete(i) for i in tabla.get_children()];tabla["columns"]=()
         if datos is None or datos.empty:self._configurar_funcionalidad_orden_tabla(tabla); logger.debug(f"Tabla '{tabla_nombre}' vaciada."); return
-        
-        cols_orig=list(datos.columns)
-        cols_para_usar_en_tabla: List[str]
-
+        cols_orig=list(datos.columns); cols_para_usar_en_tabla: List[str]
         if columnas_a_mostrar:
-            # Si columnas_a_mostrar es una lista de enteros (índices)
             if all(isinstance(c, int) for c in columnas_a_mostrar):
-                try:
-                    cols_para_usar_en_tabla = [cols_orig[i] for i in columnas_a_mostrar if 0 <= i < len(cols_orig)]
-                except IndexError: # Si algún índice está fuera de rango
-                    logger.warning(f"Índices en columnas_a_mostrar fuera de rango para tabla '{tabla_nombre}'. Usando todas las columnas.")
-                    cols_para_usar_en_tabla = cols_orig
-            # Si columnas_a_mostrar es una lista de strings (nombres de columna)
-            elif all(isinstance(c, str) for c in columnas_a_mostrar):
-                cols_para_usar_en_tabla = [c for c in columnas_a_mostrar if c in cols_orig]
-            else: # Caso mixto o tipo inesperado, usar todas las columnas
-                logger.warning(f"Tipo inesperado para columnas_a_mostrar en tabla '{tabla_nombre}'. Usando todas las columnas.")
-                cols_para_usar_en_tabla = cols_orig
-            
-            if not cols_para_usar_en_tabla : # Fallback si la selección no dio nada válido
-                logger.warning(f"columnas_a_mostrar no resultó en columnas válidas para tabla '{tabla_nombre}'. Usando todas las columnas.")
-                cols_para_usar_en_tabla = cols_orig
-        else: # Si columnas_a_mostrar es None
-            cols_para_usar_en_tabla = cols_orig
-
+                try: cols_para_usar_en_tabla = [cols_orig[i] for i in columnas_a_mostrar if 0 <= i < len(cols_orig)]
+                except IndexError: logger.warning(f"Índices en columnas_a_mostrar fuera de rango para tabla '{tabla_nombre}'. Usando todas."); cols_para_usar_en_tabla = cols_orig
+            elif all(isinstance(c, str) for c in columnas_a_mostrar): cols_para_usar_en_tabla = [c for c in columnas_a_mostrar if c in cols_orig]
+            else: logger.warning(f"Tipo inesperado para columnas_a_mostrar en tabla '{tabla_nombre}'. Usando todas."); cols_para_usar_en_tabla = cols_orig
+            if not cols_para_usar_en_tabla : logger.warning(f"columnas_a_mostrar no resultó en columnas válidas para tabla '{tabla_nombre}'. Usando todas."); cols_para_usar_en_tabla = cols_orig
+        else: cols_para_usar_en_tabla = cols_orig
         if not cols_para_usar_en_tabla:self._configurar_funcionalidad_orden_tabla(tabla); logger.debug(f"Tabla '{tabla_nombre}' sin columnas usables."); return
-        
         tabla["columns"]=tuple(cols_para_usar_en_tabla)
         for c in cols_para_usar_en_tabla:
             tabla.heading(c,text=str(c),anchor=tk.W)
             try:
-                # Asegurarse que la columna 'c' exista en 'datos' antes de accederla
-                if c in datos.columns:
-                    ancho_contenido = datos[c].astype(str).str.len().quantile(0.95) if not datos[c].empty else 0
-                else: # Columna 'c' no está en los datos, usar ancho por defecto
-                    ancho_contenido = 0 
+                if c in datos.columns: ancho_contenido = datos[c].astype(str).str.len().quantile(0.95) if not datos[c].empty else 0
+                else: ancho_contenido = 0 
                 ancho_cabecera = len(str(c)); ancho = max(70, min(int(max(ancho_cabecera * 7, ancho_contenido * 5.5) + 15), 350))
-            except Exception as e_ancho: 
-                logger.warning(f"Error calculando ancho para columna '{c}' en tabla '{tabla_nombre}': {e_ancho}")
-                ancho = 100 # Ancho por defecto en caso de error
+            except Exception as e_ancho: logger.warning(f"Error calculando ancho para columna '{c}' en tabla '{tabla_nombre}': {e_ancho}"); ancho = 100
             tabla.column(c,anchor=tk.W,width=ancho,minwidth=50)
-        
-        df_iterar = datos[cols_para_usar_en_tabla] 
-        num_filas_original=len(df_iterar) 
+        df_iterar = datos[cols_para_usar_en_tabla]; num_filas_original=len(df_iterar)
         mostrar_todo_por_resaltado = is_dicc and indices_a_resaltar and num_filas_original > 0
         if not mostrar_todo_por_resaltado and limite_filas and num_filas_original > limite_filas: df_iterar=df_iterar.head(limite_filas)
         elif mostrar_todo_por_resaltado: logger.debug(f"Mostrando todas {num_filas_original} filas de '{tabla_nombre}' por resaltado.")
@@ -1108,9 +1133,10 @@ class InterfazGrafica(tk.Tk):
         elif not last_char_rel or last_char_rel in [" ","+","|","/"]:
             if self.op_buttons.get("-"): self.op_buttons["-"]["state"]="disabled"
     def _insertar_operador_validado(self,op_limpio):
-        ops_con_espacio_alrededor = ["+", "|", "/", "-"]
+        ops_con_espacio_alrededor = ["+", "|", "/"] # Eliminado '-' de aquí, ya que en rangos no lleva espacios obligatorios
         texto_a_insertar: str
         if op_limpio in ops_con_espacio_alrededor: texto_a_insertar = f" {op_limpio} "
+        elif op_limpio == "-": texto_a_insertar = f"{op_limpio}" # Para rangos tipo "10-20"
         elif op_limpio in [">=", "<="]: texto_a_insertar = f"{op_limpio}"
         elif op_limpio in [">", "<", "="]: texto_a_insertar = f"{op_limpio}"
         elif op_limpio == "#": texto_a_insertar = f"{op_limpio} "
@@ -1131,13 +1157,13 @@ class InterfazGrafica(tk.Tk):
 
 # --- Punto de Entrada Principal de la Aplicación ---
 if __name__ == "__main__":
-    LOG_FILE_NAME = "Buscador_Avanzado_App_v1.9.log" # Versión con parseo numérico mejorado
+    LOG_FILE_NAME = "Buscador_Avanzado_App_v1.10.log" # Versión con Sinónimos Unidad Mejorados
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(funcName)s() - %(message)s",
         handlers=[logging.FileHandler(LOG_FILE_NAME, encoding="utf-8", mode="w"), logging.StreamHandler()])
     root_logger = logging.getLogger()
-    root_logger.info(f"--- Iniciando Buscador Avanzado v1.9 (Parseo Num Mejorado) (Script: {Path(__file__).name}) ---")
+    root_logger.info(f"--- Iniciando Buscador Avanzado v1.10 (Sinónimos Unidad Mejorados) (Script: {Path(__file__).name}) ---")
     root_logger.info(f"Logs siendo guardados en: {Path(LOG_FILE_NAME).resolve()}")
 
     dependencias_faltantes_main: List[str] = []
