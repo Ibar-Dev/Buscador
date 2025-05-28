@@ -49,6 +49,9 @@ class OrigenResultados(Enum):
     TERMINO_INVALIDO = auto() # El término de búsqueda fue parseado como inválido o no generó segmentos de búsqueda válidos.
     VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC = auto() # La búsqueda era puramente negativa, FCDs filtrados por negación produjeron resultados en desc.
     VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC = auto() # La búsqueda era puramente negativa, FCDs filtrados por negación no produjeron resultados en desc.
+    VIA_DICCIONARIO_UNIDAD_Y_NUMERICO_EN_DESC = auto() # Flujo alternativo: FCDs por unidad, numérico + sinónimos en descripción.
+    VIA_DICCIONARIO_UNIDAD_SIN_RESULTADOS_DESC = auto() # Flujo alternativo: FCDs por unidad, pero sin resultados numéricos/sinónimos en descripción.
+
 
     @property
     def es_via_diccionario(self) -> bool:
@@ -60,6 +63,8 @@ class OrigenResultados(Enum):
             OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS,
             OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC,
             OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC,
+            OrigenResultados.VIA_DICCIONARIO_UNIDAD_Y_NUMERICO_EN_DESC,
+            OrigenResultados.VIA_DICCIONARIO_UNIDAD_SIN_RESULTADOS_DESC,
         }
     @property
     def es_directo_descripcion(self) -> bool:
@@ -110,11 +115,11 @@ class ExtractorMagnitud:
         # Normaliza un texto: mayúsculas, sin acentos, solo alfanuméricos y ciertos símbolos, espacios normalizados.
         if not isinstance(texto, str) or not texto: return "" # Retorna vacío si no es string o está vacío
         try:
-            texto_upper = texto.upper() # Convierte a mayúsculas
-            forma_normalizada = unicodedata.normalize("NFKD", texto_upper) # Normaliza a NFKD (descompone caracteres con acentos)
-            # Elimina caracteres diacríticos (acentos) y conserva solo alfanuméricos, espacios y símbolos permitidos
+            texto_upper = texto.upper() # Convertir a mayúsculas
+            forma_normalizada = unicodedata.normalize("NFKD", texto_upper) # Normalizar a NFKD para separar caracteres base de diacríticos
+            # Eliminar diacríticos y conservar solo alfanuméricos, espacios y algunos caracteres especiales
             res = "".join(c for c in forma_normalizada if not unicodedata.combining(c) and (c.isalnum() or c.isspace() or c in ['.', '-', '_', '/']))
-            return ' '.join(res.split()) # Reemplaza múltiples espacios por uno solo y quita espacios al inicio/final
+            return ' '.join(res.split()) # Normalizar múltiples espacios a uno solo y quitar espacios al inicio/final
         except TypeError: # Captura error si el texto no es procesable (ej. si fuera None a pesar del chequeo inicial)
             logger.error(f"TypeError en _normalizar_texto (ExtractorMagnitud) con entrada: {texto}")
             return ""
@@ -171,7 +176,7 @@ class MotorBusqueda:
         self.extractor_magnitud = ExtractorMagnitud() # Inicializa el extractor de magnitudes (inicialmente vacío o con predefinidos)
 
     def cargar_excel_diccionario(self, ruta_str: str) -> Tuple[bool, Optional[str]]:
-        ruta = Path(ruta_str) # Convierte la ruta a objeto Path
+        ruta = Path(ruta_str) # Convierte la ruta string a objeto Path
         df_cargado, error_msg_carga = ManejadorExcel.cargar_excel(ruta) # Intenta cargar el archivo
 
         if df_cargado is None: # Si la carga falla
@@ -213,10 +218,10 @@ class MotorBusqueda:
                 logger.info(f"Extractor de magnitudes actualizado desde '{ruta.name}' usando formas canónicas y sinónimos.")
             else: # Si no se pudieron extraer mapeos
                 logger.warning(f"No se extrajeron mapeos de unidad válidos desde '{ruta.name}'. ExtractorMagnitud usará su predefinido (si existe) o estará vacío.")
-                self.extractor_magnitud = ExtractorMagnitud() # Resetea al predefinido o vacío
+                self.extractor_magnitud = ExtractorMagnitud() 
         else: # Si el archivo de diccionario no tiene columnas
             logger.warning(f"El archivo de diccionario '{ruta.name}' no tiene columnas. No se pudo actualizar el extractor de magnitudes.")
-            self.extractor_magnitud = ExtractorMagnitud() # Resetea
+            self.extractor_magnitud = ExtractorMagnitud() 
 
         self.datos_diccionario = df_cargado # Almacena el DataFrame cargado
         self.archivo_diccionario_actual = ruta # Almacena la ruta del archivo
@@ -226,9 +231,9 @@ class MotorBusqueda:
         return True, None # Retorna éxito
 
     def cargar_excel_descripcion(self, ruta_str: str) -> Tuple[bool, Optional[str]]:
-        ruta = Path(ruta_str) # Convierte la ruta string a objeto Path
+        ruta = Path(ruta_str) # Convierte la ruta a objeto Path
         df_cargado, error_msg_carga = ManejadorExcel.cargar_excel(ruta) # Intenta cargar el archivo
-        if df_cargado is None: # Si la carga falla
+        if df_cargado is None: # Si falla la carga
             self.datos_descripcion = None; self.archivo_descripcion_actual = None # Resetea
             return False, error_msg_carga # Devuelve fallo
         self.datos_descripcion = df_cargado; self.archivo_descripcion_actual = ruta # Almacena DataFrame y ruta
@@ -279,7 +284,7 @@ class MotorBusqueda:
 
     def _aplicar_negaciones_y_extraer_positivos(self, df_original: pd.DataFrame, cols: List[str], texto: str) -> Tuple[pd.DataFrame, str, List[str]]:
         texto_limpio_entrada = texto.strip(); terminos_negados_encontrados: List[str] = [] # Inicializa variables
-        df_a_procesar = df_original.copy() if df_original is not None else pd.DataFrame() # Copia DataFrame o crea uno vacío
+        df_a_procesar = df_original.copy() if df_original is not None else pd.DataFrame() # Copia el DF o crea uno vacío
         if not texto_limpio_entrada: return df_a_procesar, "", terminos_negados_encontrados # Si el texto es vacío, retorna
         
         partes_positivas: List[str] = []; ultimo_indice_fin_negado = 0
@@ -294,7 +299,7 @@ class MotorBusqueda:
         partes_positivas.append(texto_limpio_entrada[ultimo_indice_fin_negado:]) # Añade la última parte positiva
         terminos_positivos_final_str = ' '.join("".join(partes_positivas).split()).strip() # Concatena y limpia los términos positivos
 
-        if df_a_procesar.empty or not terminos_negados_encontrados or not cols: # Si no hay que filtrar por negación
+        if df_a_procesar.empty or not terminos_negados_encontrados or not cols: # Si no hay nada que filtrar por negación
             logger.debug(f"Parseo negación: Query='{texto_limpio_entrada}', Positivos='{terminos_positivos_final_str}', Negados={terminos_negados_encontrados}. No se aplicó filtro al DF.")
             return df_a_procesar, terminos_positivos_final_str, terminos_negados_encontrados
         
@@ -307,7 +312,8 @@ class MotorBusqueda:
                 if nombre_columna not in df_a_procesar.columns: continue # Salta si la columna no existe
                 try:
                     serie_columna_normalizada = df_a_procesar[nombre_columna].astype(str).map(self._normalizar_para_busqueda) # Normaliza la columna
-                    mascara_para_este_termino_negado |= serie_columna_normalizada.str.contains(patron_regex_negado, regex=True, na=False) # Aplica OR a la máscara
+                    # Acumula filas que contienen el término negado
+                    mascara_para_este_termino_negado |= serie_columna_normalizada.str.contains(patron_regex_negado, regex=True, na=False) 
                 except Exception as e_neg_col: logger.error(f"Error aplicando negación en col '{nombre_columna}', term '{termino_negado_actual}': {e_neg_col}")
             mascara_exclusion_total |= mascara_para_este_termino_negado # Acumula la máscara de exclusión
         
@@ -428,11 +434,12 @@ class MotorBusqueda:
 
                 # Caso A: Una sola coma (ej. "9,10", "09,100", "9,100", "1.234,56")
                 if len(partes_coma) == 2:
-                    # Quita puntos de miles de la parte entera (ej. "1.234" de "1.234,56" -> "1234")
+                    # Quita puntos internos de la parte entera (ej. "1.234" de "1.234,56" -> "1234")
                     parte_entera_limpia_str = parte_entera_antes_primera_coma_str.replace('.', '') 
                     parte_decimal_str = partes_coma[1].strip() # Toma la parte decimal y limpia espacios.
 
                     # Antes de proceder, verifica si las partes son realmente numéricas.
+                    # Se permite un signo negativo opcional al inicio de la parte entera.
                     if not (parte_entera_limpia_str.isdigit() or (parte_entera_limpia_str.startswith('-') and parte_entera_limpia_str[1:].isdigit())) or \
                        not parte_decimal_str.isdigit():
                         logger.warning(f"    Partes no numéricas alrededor de coma única: '{s_limpio}' -> entera:'{parte_entera_limpia_str}', decimal:'{parte_decimal_str}'")
@@ -467,7 +474,7 @@ class MotorBusqueda:
                         logger.warning(f"    Partes no numéricas con múltiples comas: '{s_limpio}'")
                         raise ValueError("Partes no numéricas con múltiples comas.")
 
-                    # Si la última parte tiene 3 dígitos Y no hay cero inicial relevante al inicio del número Y es todo dígitos -> se interpreta como parte de un entero grande.
+                    # Si la última parte (después de la última coma) tiene 3 dígitos Y no hay cero inicial relevante al inicio del número Y es todo dígitos -> se interpreta como parte de un entero grande.
                     if len(parte_decimal_final_m_comas) == 3 and not es_cero_inicial_relevante:
                          numero_reconstruido = f"{parte_entera_reconstruida_m_comas}{parte_decimal_final_m_comas}" # ej. "1,234,567" -> "1234" + "567" = "1234567"
                          logger.debug(f"  Múltiples comas, interpretado como entero grande (3 dig post-última coma): '{s_limpio}' -> '{numero_reconstruido}'")
@@ -527,72 +534,128 @@ class MotorBusqueda:
             logger.error(f"Parseo num: Excepción inesperada '{type(e).__name__}' para '{s_limpio}' (originado de '{num_str}'): {e}")
             return None
 
-    def _generar_mascara_para_un_termino(self, df: pd.DataFrame, cols: List[str], term_an: Dict[str, Any]) -> pd.Series:
-        # No hay cambios en esta función más allá de la llamada a la nueva _parse_numero.
-        # Los comentarios permanecen igual que en la versión original proporcionada por el usuario.
-        tipo_termino = term_an["tipo"]; valor_termino = term_an["valor"]; unidad_requerida_canonica = term_an.get("unidad_busqueda")
-        mascara_total_termino = pd.Series(False, index=df.index)
-        for nombre_columna in cols:
-            if nombre_columna not in df.columns: continue
-            columna_serie = df[nombre_columna]; mascara_columna_actual_numerica = pd.Series(False, index=df.index)
-            if tipo_termino in ["gt", "lt", "ge", "le", "range", "eq"]:
-                for indice_fila, valor_celda_raw in columna_serie.items():
-                    if pd.isna(valor_celda_raw) or str(valor_celda_raw).strip() == "": continue
+    def _generar_mascara_para_un_termino(self, df: pd.DataFrame, cols: List[str], term_an: Dict[str, Any], filtro_numerico_original: Optional[Dict[str, Any]] = None) -> pd.Series:
+        # Obtiene el tipo, valor y unidad del término analizado.
+        tipo_termino = term_an["tipo"]
+        valor_termino = term_an["valor"]
+        unidad_requerida_canonica_query = term_an.get("unidad_busqueda")
+
+        # Si hay un filtro numérico original (del flujo alternativo), se usará en lugar del 'valor_termino' y 'unidad_requerida_canonica_query' del término actual (que sería solo la unidad en ese flujo).
+        # Esto es para el caso donde las FCDs se eligen solo por unidad, y el criterio numérico de la query original se aplica en descripciones.
+        valor_a_comparar_final = valor_termino
+        unidad_final_para_comparar_canonica = unidad_requerida_canonica_query
+        operador_final_para_comparar = tipo_termino
+
+        if filtro_numerico_original: # Si se pasó un filtro numérico (del flujo alternativo 2.a.iv)
+            logger.debug(f"    Aplicando filtro numérico original: {filtro_numerico_original} sobre término actual: {term_an}")
+            valor_a_comparar_final = filtro_numerico_original["valor"] # El valor de la query original (ej. 100 de <100V)
+            unidad_final_para_comparar_canonica = filtro_numerico_original.get("unidad_busqueda") # La unidad de la query original (ej. canon(V))
+            operador_final_para_comparar = filtro_numerico_original["tipo"] # El operador de la query original (ej. 'lt')
+            # El 'valor_termino' del term_an actual (que sería el sinónimo extraído de FCD basado en unidad) se usará para la coincidencia de texto.
+
+        mascara_total_termino = pd.Series(False, index=df.index) # Máscara inicializada a False
+
+        for nombre_columna in cols: # Itera sobre las columnas especificadas para la búsqueda
+            if nombre_columna not in df.columns: continue # Salta si la columna no existe en el DataFrame
+            
+            columna_serie = df[nombre_columna] # Serie de pandas para la columna actual
+            
+            # Si el término de búsqueda es numérico (gt, lt, ge, le, range, eq) o si hay un filtro numérico original
+            if operador_final_para_comparar in ["gt", "lt", "ge", "le", "range", "eq"]:
+                mascara_columna_actual_numerica = pd.Series(False, index=df.index) # Máscara para coincidencias numéricas en esta columna
+                for indice_fila, valor_celda_raw in columna_serie.items(): # Itera sobre cada celda de la columna
+                    if pd.isna(valor_celda_raw) or str(valor_celda_raw).strip() == "": continue # Salta celdas vacías o NaN
+                    
+                    # Busca todos los patrones de número-unidad en la celda
                     for match_num_unidad_celda in self.patron_num_unidad_df.finditer(str(valor_celda_raw)):
                         try:
-                            num_celda_str = match_num_unidad_celda.group(1)
-                            num_celda_val = self._parse_numero(num_celda_str) 
-                            u_c_raw = match_num_unidad_celda.group(2)
-                            if num_celda_val is None: continue
-                            u_c_canon = self.extractor_magnitud.obtener_magnitud_normalizada(u_c_raw.strip()) if u_c_raw and u_c_raw.strip() else None
-                            u_ok = (unidad_requerida_canonica is None) or \
-                                   (u_c_canon is not None and u_c_canon == unidad_requerida_canonica) or \
-                                   (u_c_raw and unidad_requerida_canonica and self.extractor_magnitud._normalizar_texto(u_c_raw.strip()) == unidad_requerida_canonica)
-                            if not u_ok: continue
-                            cond = False
-                            if tipo_termino == "eq" and np.isclose(num_celda_val, valor_termino): cond = True
-                            elif tipo_termino == "gt" and num_celda_val > valor_termino and not np.isclose(num_celda_val, valor_termino): cond = True
-                            elif tipo_termino == "lt" and num_celda_val < valor_termino and not np.isclose(num_celda_val, valor_termino): cond = True
-                            elif tipo_termino == "ge" and (num_celda_val >= valor_termino or np.isclose(num_celda_val, valor_termino)): cond = True
-                            elif tipo_termino == "le" and (num_celda_val <= valor_termino or np.isclose(num_celda_val, valor_termino)): cond = True
-                            elif tipo_termino == "range" and ((valor_termino[0] <= num_celda_val or np.isclose(num_celda_val, valor_termino[0])) and \
-                                                               (num_celda_val <= valor_termino[1] or np.isclose(num_celda_val, valor_termino[1]))): cond = True
-                            if cond: mascara_columna_actual_numerica.at[indice_fila] = True; break
-                        except ValueError: continue
-                mascara_total_termino |= mascara_columna_actual_numerica
-            elif tipo_termino == "str":
+                            num_celda_str = match_num_unidad_celda.group(1) # Extrae la parte numérica de la celda
+                            num_celda_val = self._parse_numero(num_celda_str) # Parsea el número
+                            unidad_celda_raw = match_num_unidad_celda.group(2) # Extrae la parte de unidad de la celda
+                            
+                            if num_celda_val is None: continue # Si el número no se pudo parsear, salta
+
+                            # Normaliza la unidad de la celda
+                            unidad_celda_canonica = self.extractor_magnitud.obtener_magnitud_normalizada(unidad_celda_raw.strip()) if unidad_celda_raw and unidad_celda_raw.strip() else None
+                            
+                            # Comprueba la compatibilidad de unidades
+                            unidad_coincide = (unidad_final_para_comparar_canonica is None) or \
+                                              (unidad_celda_canonica is not None and unidad_celda_canonica == unidad_final_para_comparar_canonica) or \
+                                              (unidad_celda_raw and unidad_final_para_comparar_canonica and self.extractor_magnitud._normalizar_texto(unidad_celda_raw.strip()) == unidad_final_para_comparar_canonica)
+                            
+                            if not unidad_coincide: continue # Si las unidades no coinciden (y se requiere una), salta
+                            
+                            # Realiza la comparación numérica según el operador
+                            condicion_cumplida = False
+                            if operador_final_para_comparar == "eq" and np.isclose(num_celda_val, valor_a_comparar_final): condicion_cumplida = True
+                            elif operador_final_para_comparar == "gt" and num_celda_val > valor_a_comparar_final and not np.isclose(num_celda_val, valor_a_comparar_final): condicion_cumplida = True
+                            elif operador_final_para_comparar == "lt" and num_celda_val < valor_a_comparar_final and not np.isclose(num_celda_val, valor_a_comparar_final): condicion_cumplida = True
+                            elif operador_final_para_comparar == "ge" and (num_celda_val >= valor_a_comparar_final or np.isclose(num_celda_val, valor_a_comparar_final)): condicion_cumplida = True
+                            elif operador_final_para_comparar == "le" and (num_celda_val <= valor_a_comparar_final or np.isclose(num_celda_val, valor_a_comparar_final)): condicion_cumplida = True
+                            elif operador_final_para_comparar == "range" and ((valor_a_comparar_final[0] <= num_celda_val or np.isclose(num_celda_val, valor_a_comparar_final[0])) and \
+                                                                       (num_celda_val <= valor_a_comparar_final[1] or np.isclose(num_celda_val, valor_a_comparar_final[1]))): condicion_cumplida = True
+                            
+                            if condicion_cumplida:
+                                # Si es un flujo alternativo con filtro numérico, también debe coincidir el texto del sinónimo original
+                                if filtro_numerico_original:
+                                    texto_sinonimo_normalizado = self._normalizar_para_busqueda(term_an["original"])
+                                    patron_regex_sinonimo = r"\b" + re.escape(texto_sinonimo_normalizado) + r"\b"
+                                    if re.search(patron_regex_sinonimo, self._normalizar_para_busqueda(str(valor_celda_raw))):
+                                        mascara_columna_actual_numerica.at[indice_fila] = True; break # Coincide número, unidad Y sinónimo
+                                else: # Flujo normal, solo comparación numérica y de unidad
+                                    mascara_columna_actual_numerica.at[indice_fila] = True; break # Coincide número y unidad
+                        except ValueError: continue # Error al parsear, salta
+                    if mascara_columna_actual_numerica.at[indice_fila]: break # Si ya se encontró en esta celda, pasa a la siguiente fila
+                mascara_total_termino |= mascara_columna_actual_numerica # Acumula la máscara de la columna
+            
+            # Si el término es de tipo string (o si es un flujo alternativo y el filtro numérico ya se consideró arriba junto con el texto)
+            # Y NO es el caso donde estamos en flujo alternativo (filtro_numerico_original existe),
+            # porque en ese caso la coincidencia de texto ya se verificó dentro del bloque numérico.
+            if tipo_termino == "str" and not filtro_numerico_original:
                 try:
-                    val_norm_busq = str(valor_termino);
-                    if not val_norm_busq: continue
-                    serie_norm_df_col = columna_serie.astype(str).map(self._normalizar_para_busqueda)
-                    pat_regex = r"\b" + re.escape(val_norm_busq) + r"\b"
-                    mascara_col_actual = serie_norm_df_col.str.contains(pat_regex, regex=True, na=False)
-                    mascara_total_termino |= mascara_col_actual
-                except Exception as e: logger.warning(f"Error búsqueda STR col '{nombre_columna}' para '{valor_termino}': {e}")
+                    valor_normalizado_busqueda = str(valor_termino) # Ya está normalizado por _analizar_terminos
+                    if not valor_normalizado_busqueda: continue # Salta si el valor de búsqueda es vacío
+                    
+                    serie_normalizada_df_columna = columna_serie.astype(str).map(self._normalizar_para_busqueda) # Normaliza la columna del DataFrame
+                    patron_regex = r"\b" + re.escape(valor_normalizado_busqueda) + r"\b" # Crea regex para palabra completa
+                    mascara_columna_actual_str = serie_normalizada_df_columna.str.contains(patron_regex, regex=True, na=False) # Busca
+                    mascara_total_termino |= mascara_columna_actual_str # Acumula la máscara
+                except Exception as e: 
+                    logger.warning(f"Error búsqueda STR en columna '{nombre_columna}' para término '{valor_termino}': {e}")
         return mascara_total_termino
 
-    def _aplicar_mascara_combinada_para_segmento_and(self, df: pd.DataFrame, cols: List[str], term_an_seg: List[Dict[str, Any]]) -> pd.Series:
-        if df is None or df.empty or not cols: return pd.Series(False, index=df.index if df is not None else None)
-        if not term_an_seg: return pd.Series(False, index=df.index)
+    def _aplicar_mascara_combinada_para_segmento_and(self, df: pd.DataFrame, cols: List[str], term_an_seg: List[Dict[str, Any]], filtro_numerico_original_para_desc: Optional[Dict] = None) -> pd.Series:
+        # Aplica una serie de máscaras (una por cada término AND) a un DataFrame.
+        if df is None or df.empty or not cols: return pd.Series(False, index=df.index if df is not None else None) # Casos base
+        if not term_an_seg: return pd.Series(False, index=df.index) # Si no hay términos, máscara False
+
         mascara_final = pd.Series(True, index=df.index) # Inicia con todos True para la operación AND
         for term_ind_an in term_an_seg: # Itera sobre cada término del segmento AND
+            # Manejo de sub-queries OR encapsuladas dentro de un AND, ej. "termino1 + (termino2 | termino3)"
             if term_ind_an["tipo"] == "str" and \
-               ("|" in term_ind_an["original"] or "/" in term_ind_an["original"]) and \
-               term_ind_an["original"].startswith("(") and term_ind_an["original"].endswith(")"): # Si es una sub-query OR encapsulada
+               ("|" in term_ind_an["original"]) and \
+               term_ind_an["original"].startswith("(") and term_ind_an["original"].endswith(")"): 
                 logger.debug(f"Segmento AND contiene sub-query OR: '{term_ind_an['original']}'. Se procesará por separado.")
                 # Llama recursivamente a _procesar_busqueda_en_df_objetivo para obtener la máscara de la sub-query OR
+                # NOTA: filtro_numerico_original_para_desc NO se propaga a estas sub-queries internas de un AND, 
+                # ya que se asume que cada parte del AND principal tiene su propia lógica numérica o textual.
                 sub_mascara_or_series, err_sub_or = self._procesar_busqueda_en_df_objetivo(df, cols, term_ind_an["original"], None, return_mask_only=True) 
                 if err_sub_or or sub_mascara_or_series is None: # Si hay error o no se devuelve máscara
                     logger.warning(f"Sub-query OR '{term_ind_an['original']}' falló o no devolvió máscara: {err_sub_or}")
-                    return pd.Series(False, index=df.index) # El AND completo falla
+                    return pd.Series(False, index=df.index) # Si falla la sub-query, el AND completo falla
                 mascara_este_term = sub_mascara_or_series.reindex(df.index, fill_value=False) # Alinea la máscara
             else: # Si es un término atómico normal
-                mascara_este_term = self._generar_mascara_para_un_termino(df, cols, term_ind_an) # Genera la máscara para este término
+                # Pasa el filtro_numerico_original_para_desc a _generar_mascara_para_un_termino.
+                # Este filtro solo tendrá efecto si el term_ind_an actual es para un flujo alternativo
+                # donde la búsqueda en descripciones necesita aplicar la condición numérica original.
+                mascara_este_term = self._generar_mascara_para_un_termino(df, cols, term_ind_an, filtro_numerico_original_para_desc)
+            
             mascara_final &= mascara_este_term # Aplica AND lógico a la máscara final
             if not mascara_final.any(): break # Optimización: si ya no hay True, el resultado del AND será False
         return mascara_final
 
     def _combinar_mascaras_de_segmentos_or(self, lista_mascaras: List[pd.Series], df_idx_ref: Optional[pd.Index] = None) -> pd.Series:
+        # Combina una lista de máscaras booleanas usando el operador OR.
         if not lista_mascaras: # Si no hay máscaras para combinar
             # Retorna una Serie vacía o con el índice de referencia, toda False
             return pd.Series(False, index=df_idx_ref) if df_idx_ref is not None else pd.Series(dtype=bool)
@@ -617,8 +680,12 @@ class MotorBusqueda:
             mascara_final |= mascara_alineada # Combina con OR lógico
         return mascara_final
 
-    def _procesar_busqueda_en_df_objetivo(self, df_obj: pd.DataFrame, cols_obj: List[str], termino_busqueda_original_para_este_df: str, terminos_negativos_adicionales: Optional[List[str]] = None, return_mask_only: bool = False) -> Union[Tuple[pd.DataFrame, Optional[str]], Tuple[Optional[pd.Series], Optional[str]]]:
-        logger.debug(f"Proc. búsqueda DF: Query='{termino_busqueda_original_para_este_df}' en {len(cols_obj)} cols de DF ({len(df_obj if df_obj is not None else [])} filas). Neg. Adic: {terminos_negativos_adicionales}, ReturnMask: {return_mask_only}")
+    def _procesar_busqueda_en_df_objetivo(self, df_obj: pd.DataFrame, cols_obj: List[str], termino_busqueda_original_para_este_df: str, terminos_negativos_adicionales: Optional[List[str]] = None, return_mask_only: bool = False, filtro_numerico_original_desc: Optional[Dict] = None) -> Union[Tuple[pd.DataFrame, Optional[str]], Tuple[Optional[pd.Series], Optional[str]]]:
+        # Procesa una búsqueda (con posibles negaciones, ORs, ANDs) en un DataFrame objetivo.
+        # Puede devolver un DataFrame filtrado o solo la máscara booleana.
+        # filtro_numerico_original_desc: Se usa en el flujo alternativo para aplicar el criterio numérico original a las descripciones.
+        
+        logger.debug(f"Proc. búsqueda DF: Query='{termino_busqueda_original_para_este_df}' en {len(cols_obj)} cols de DF ({len(df_obj if df_obj is not None else [])} filas). Neg. Adic: {terminos_negativos_adicionales}, ReturnMask: {return_mask_only}, FiltroNumDesc: {filtro_numerico_original_desc is not None}")
         
         if df_obj is None: # Si el DataFrame objetivo no existe
              df_obj = pd.DataFrame() # Usa un DataFrame vacío para evitar errores
@@ -650,9 +717,15 @@ class MotorBusqueda:
         # Si no hay términos positivos, el resultado es el DataFrame después de aplicar las negaciones
         if not terminos_positivos_final_para_parseo.strip():
             logger.debug(f"Sin términos positivos ('{terminos_positivos_final_para_parseo}'). Devolviendo DF/Máscara post-negaciones ({len(df_actual_procesando)} filas).")
-            return (pd.Series(True, index=df_actual_procesando.index) if return_mask_only and not df_actual_procesando.empty else pd.Series(False, index=df_obj.index if df_obj is not None else None)), \
-                   None if return_mask_only else df_actual_procesando.copy(), \
-                   None
+            # Si se retorna máscara, debe ser True para las filas que quedan, o False para el índice original si df_actual_procesando se vació.
+            if return_mask_only:
+                mask = pd.Series(False, index=df_obj.index if df_obj is not None else None)
+                if not df_actual_procesando.empty:
+                    mask.loc[df_actual_procesando.index] = True
+                return mask, None
+            else:
+                return df_actual_procesando.copy(), None
+
 
         operador_nivel1, segmentos_nivel1_or = self._descomponer_nivel1_or(terminos_positivos_final_para_parseo) # Descompone la query en segmentos OR
         
@@ -663,7 +736,15 @@ class MotorBusqueda:
                 return (pd.Series(False, index=df_actual_procesando.index if not df_actual_procesando.empty else None) if return_mask_only else pd.DataFrame(columns=df_actual_procesando.columns)), msg_error_segmentos
             else: # Si todo estaba vacío
                 logger.debug("Query original y positiva post-negación vacías. Devolviendo DF/Máscara post-negaciones.")
-                return (pd.Series(True, index=df_actual_procesando.index if not df_actual_procesando.empty else None) if return_mask_only else df_actual_procesando.copy()), None
+                # Similar al caso de "sin términos positivos"
+                if return_mask_only:
+                    mask = pd.Series(False, index=df_obj.index if df_obj is not None else None)
+                    if not df_actual_procesando.empty:
+                        mask.loc[df_actual_procesando.index] = True
+                    return mask, None
+                else:
+                    return df_actual_procesando.copy(), None
+
 
         lista_mascaras_para_or: List[pd.Series] = [] # Lista para almacenar máscaras de cada segmento OR
         for segmento_or_actual in segmentos_nivel1_or: # Itera sobre cada segmento OR
@@ -680,7 +761,13 @@ class MotorBusqueda:
                 logger.debug(f"Segmento OR '{segmento_or_actual}' sin términos atómicos. Se ignora para OR.")
                 mascara_para_segmento_or_actual = pd.Series(False, index=df_actual_procesando.index if not df_actual_procesando.empty else None)
             else: # Si hay términos atómicos, aplica la máscara combinada AND
-                mascara_para_segmento_or_actual = self._aplicar_mascara_combinada_para_segmento_and(df_actual_procesando, cols_obj, terminos_atomicos_analizados_and)
+                # Pasa filtro_numerico_original_desc si se está procesando para descripciones y viene de flujo alternativo
+                mascara_para_segmento_or_actual = self._aplicar_mascara_combinada_para_segmento_and(
+                    df_actual_procesando, 
+                    cols_obj, 
+                    terminos_atomicos_analizados_and,
+                    filtro_numerico_original_para_desc=filtro_numerico_original_desc # Se pasa aquí
+                )
             lista_mascaras_para_or.append(mascara_para_segmento_or_actual) # Añade la máscara del segmento a la lista
 
         idx_ref_or = df_actual_procesando.index if not df_actual_procesando.empty else (df_obj.index if df_obj is not None else None)
@@ -706,6 +793,7 @@ class MotorBusqueda:
             return df_resultado_final, None
 
     def _extraer_terminos_de_fila_completa(self, fila_df: pd.Series) -> Set[str]:
+        # Extrae términos significativos de todas las celdas de una fila de DataFrame.
         terminos_extraidos_de_fila: Set[str] = set() # Conjunto para almacenar términos únicos de la fila
         if fila_df is None or fila_df.empty: return terminos_extraidos_de_fila # Si la fila está vacía, retorna
         for valor_celda in fila_df.values: # Itera sobre cada valor en la fila
@@ -717,220 +805,287 @@ class MotorBusqueda:
                     palabras_significativas_celda = [palabra for palabra in texto_celda_norm.split() if len(palabra) > 1 and not palabra.isdigit()]
                     if palabras_significativas_celda: terminos_extraidos_de_fila.update(palabras_significativas_celda) # Añade palabras significativas al conjunto
                     # Si no hay palabras significativas pero el texto normalizado es útil (no es número, no es corto)
+                    # y no es un número parseable (para evitar añadir "10V" como término si ya se maneja numéricamente)
                     elif texto_celda_norm and len(texto_celda_norm) > 1 and not texto_celda_norm.isdigit() and self._parse_numero(texto_celda_norm) is None:
                         terminos_extraidos_de_fila.add(texto_celda_norm) # Añade el texto normalizado completo como un término
         return terminos_extraidos_de_fila
 
     def buscar(self, termino_busqueda_original: str, buscar_via_diccionario_flag: bool) -> Tuple[Optional[pd.DataFrame], OrigenResultados, Optional[pd.DataFrame], Optional[List[int]], Optional[str]]:
         logger.info(f"Motor.buscar INICIO: termino='{termino_busqueda_original}', via_dicc={buscar_via_diccionario_flag}")
-        # Define columnas de referencia para DataFrames vacíos, basado en descripciones si están cargadas
         columnas_descripcion_ref = self.datos_descripcion.columns if self.datos_descripcion is not None else []
-        df_vacio_para_descripciones = pd.DataFrame(columns=columnas_descripcion_ref) # DataFrame vacío estándar para descripciones
-        fcds_obtenidos_final_para_ui: Optional[pd.DataFrame] = None # DataFrame de FCDs para mostrar en UI
-        indices_fcds_a_resaltar_en_preview: Optional[List[int]] = None # Índices de FCDs a resaltar
+        df_vacio_para_descripciones = pd.DataFrame(columns=columnas_descripcion_ref)
+        fcds_obtenidos_final_para_ui: Optional[pd.DataFrame] = None
+        indices_fcds_a_resaltar_en_preview: Optional[List[int]] = None
 
-        # Manejo de término de búsqueda vacío
-        if not termino_busqueda_original.strip():
-            if self.datos_descripcion is not None: # Si hay descripciones cargadas, las devuelve todas
+        if not termino_busqueda_original.strip(): # Si el término de búsqueda es vacío
+            if self.datos_descripcion is not None:
                 logger.info("Término vacío. Devolviendo todas las descripciones.")
                 return self.datos_descripcion.copy(), OrigenResultados.DIRECTO_DESCRIPCION_VACIA, None, None, None
-            else: # Si no hay descripciones cargadas
+            else:
                 logger.warning("Término vacío y descripciones no cargadas.")
                 return df_vacio_para_descripciones, OrigenResultados.DIRECTO_DESCRIPCION_VACIA, None, None, "Descripciones no cargadas."
 
-        # Flujo de búsqueda vía diccionario
-        if buscar_via_diccionario_flag:
+        # Parseo global para obtener términos positivos y negativos de la query original
+        _df_dummy, terminos_positivos_globales, terminos_negativos_globales = self._aplicar_negaciones_y_extraer_positivos(pd.DataFrame(), [], termino_busqueda_original)
+        logger.info(f"Parseo global: Positivos='{terminos_positivos_globales}', Negativos Globales={terminos_negativos_globales}")
+        
+        # Analiza los términos positivos globales para identificar si hay un componente numérico/unidad
+        # Esto es para la lógica de fallback si la búsqueda inicial en diccionario falla.
+        filtro_numerico_original_de_query: Optional[Dict[str, Any]] = None
+        if terminos_positivos_globales.strip():
+            # Descomponer para obtener el primer término (o el único si no hay AND/OR complejos)
+            op_l1_temp, segs_l1_temp = self._descomponer_nivel1_or(terminos_positivos_globales)
+            if segs_l1_temp:
+                op_l2_temp, segs_l2_temp = self._descomponer_nivel2_and(segs_l1_temp[0]) # Analiza la primera parte
+                if segs_l2_temp:
+                    terminos_analizados_temp = self._analizar_terminos([segs_l2_temp[0]]) # Analiza el primer término atómico
+                    if terminos_analizados_temp and terminos_analizados_temp[0].get("unidad_busqueda") and \
+                       terminos_analizados_temp[0]["tipo"] in ["gt", "lt", "ge", "le", "eq", "range"]:
+                        filtro_numerico_original_de_query = terminos_analizados_temp[0].copy()
+                        logger.info(f"Detectado filtro numérico/unidad en query original: {filtro_numerico_original_de_query}")
+
+
+        if buscar_via_diccionario_flag: # Si se debe buscar a través del diccionario
             if self.datos_diccionario is None: return None, OrigenResultados.ERROR_CARGA_DICCIONARIO, None, None, "Diccionario no cargado."
-            # Obtiene columnas para buscar en el diccionario
             columnas_dic_para_fcds, err_msg_cols_dic = self._obtener_nombres_columnas_busqueda_df(self.datos_diccionario, [], "diccionario_fcds_inicial")
             if not columnas_dic_para_fcds: return None, OrigenResultados.ERROR_CONFIGURACION_COLUMNAS_DICC, None, None, err_msg_cols_dic
 
-            # Parsea la query original para separar términos positivos globales de negativos globales
-            _df_dummy, terminos_positivos_globales, terminos_negativos_globales = self._aplicar_negaciones_y_extraer_positivos(pd.DataFrame(), [], termino_busqueda_original)
-            logger.info(f"Parseo global: Positivos='{terminos_positivos_globales}', Negativos Globales={terminos_negativos_globales}")
-
-            # Lógica para búsqueda AND (cuando hay '+' en los términos positivos que no es parte de una frase exacta)
+            # Flujo principal para búsqueda vía diccionario (puede ser AND o simple/negativa)
             if "+" in terminos_positivos_globales and not (terminos_positivos_globales.startswith('"') and terminos_positivos_globales.endswith('"')):
+                # --- INICIO LÓGICA AND DE ALTO NIVEL ---
                 logger.info(f"Detectada búsqueda AND en positivos globales: '{terminos_positivos_globales}'")
-                partes_and = [p.strip() for p in terminos_positivos_globales.split("+") if p.strip()] # Divide la query AND
+                partes_and = [p.strip() for p in terminos_positivos_globales.split("+") if p.strip()]
                 df_resultado_acumulado_desc = self.datos_descripcion.copy() if self.datos_descripcion is not None else pd.DataFrame(columns=columnas_descripcion_ref)
-                fcds_indices_acumulados = set() # Conjunto para almacenar índices de FCDs encontrados
-                todas_partes_and_produjeron_terminos_validos = True # Flag para rastrear validez
-                hay_error_en_busqueda_de_parte_o_desc = False # Flag para errores
-                error_msg_critico_partes: Optional[str] = None # Mensaje de error
+                fcds_indices_acumulados = set()
+                todas_partes_and_produjeron_terminos_validos = True
+                hay_error_en_busqueda_de_parte_o_desc = False
+                error_msg_critico_partes: Optional[str] = None
 
-                if self.datos_descripcion is None: # Verifica que las descripciones estén cargadas
+                if self.datos_descripcion is None:
                      logger.error("Archivo de descripciones no cargado, no se puede proceder con búsqueda AND vía diccionario.")
                      return None, OrigenResultados.ERROR_CARGA_DESCRIPCION, None, None, "Descripciones no cargadas para búsqueda AND."
                 columnas_desc_para_filtrado, err_cols_desc_fil = self._obtener_nombres_columnas_busqueda_df(self.datos_descripcion, [], "descripcion_fcds")
-                if not columnas_desc_para_filtrado: # Verifica configuración de columnas de descripción
+                if not columnas_desc_para_filtrado:
                     return None, OrigenResultados.ERROR_CONFIGURACION_COLUMNAS_DESC, None, None, err_cols_desc_fil
 
-                # Procesa cada parte de la consulta AND secuencialmente
                 for i, parte_and_actual_str in enumerate(partes_and):
-                    if not parte_and_actual_str: continue # Salta partes vacías
+                    if not parte_and_actual_str: continue
                     logger.debug(f"Procesando parte AND '{parte_and_actual_str}' (parte {i+1}/{len(partes_and)}) en diccionario...")
-                    # Busca la parte actual en el diccionario para obtener FCDs
                     fcds_para_esta_parte, error_fcd_parte = self._procesar_busqueda_en_df_objetivo(self.datos_diccionario, columnas_dic_para_fcds, parte_and_actual_str, None)
-                    if error_fcd_parte: # Si hay error en la búsqueda de esta parte
+                    if error_fcd_parte:
                         todas_partes_and_produjeron_terminos_validos = False; hay_error_en_busqueda_de_parte_o_desc = True; error_msg_critico_partes = error_fcd_parte
                         logger.warning(f"Parte AND '{parte_and_actual_str}' falló en diccionario con error: {error_fcd_parte}"); break
-                    if fcds_para_esta_parte is None or fcds_para_esta_parte.empty: # Si no se encuentran FCDs para esta parte
+                    if fcds_para_esta_parte is None or fcds_para_esta_parte.empty:
                         todas_partes_and_produjeron_terminos_validos = False
                         logger.warning(f"Parte AND '{parte_and_actual_str}' no encontró FCDs en diccionario."); break
                     
-                    fcds_indices_acumulados.update(fcds_para_esta_parte.index.tolist()) # Acumula índices de FCDs
-                    terminos_extraidos_de_esta_parte_set: Set[str] = set() # Extrae términos de los FCDs encontrados
+                    fcds_indices_acumulados.update(fcds_para_esta_parte.index.tolist())
+                    terminos_extraidos_de_esta_parte_set: Set[str] = set()
                     for _, fila_fcd in fcds_para_esta_parte.iterrows(): terminos_extraidos_de_esta_parte_set.update(self._extraer_terminos_de_fila_completa(fila_fcd))
                     
-                    if not terminos_extraidos_de_esta_parte_set: # Si no se extrajeron términos válidos
+                    if not terminos_extraidos_de_esta_parte_set:
                         todas_partes_and_produjeron_terminos_validos = False
                         logger.warning(f"Parte AND '{parte_and_actual_str}' encontró FCDs, pero no se extrajeron términos de ellas."); break
                     
-                    # Construye una query OR con los términos extraídos para buscar en descripciones
                     terminos_or_con_comillas_actual = [f'"{t}"' if " " in t and not (t.startswith('"') and t.endswith('"')) else t for t in terminos_extraidos_de_esta_parte_set if t]
                     query_or_simple_actual = " | ".join(terminos_or_con_comillas_actual)
-                    if not query_or_simple_actual: # Si la query OR está vacía
+                    if not query_or_simple_actual:
                         todas_partes_and_produjeron_terminos_validos = False
                         logger.warning(f"Parte AND '{parte_and_actual_str}' no generó una query OR válida para descripciones."); break
                     
-                    if df_resultado_acumulado_desc.empty and i >= 0: # Si ya no hay resultados acumulados en descripciones, el AND falla
+                    if df_resultado_acumulado_desc.empty and i >= 0:
                          logger.info(f"Resultados acumulados de descripción vacíos antes de aplicar filtro para '{parte_and_actual_str}'. Búsqueda AND final será vacía."); break
                     
                     logger.info(f"Aplicando filtro OR para '{parte_and_actual_str}' (Query: '{query_or_simple_actual[:100]}...') sobre {len(df_resultado_acumulado_desc)} filas de descripción.")
-                    # Filtra los resultados acumulados de descripción con la query OR actual
-                    df_resultado_acumulado_desc, error_sub_busqueda_desc = self._procesar_busqueda_en_df_objetivo(df_resultado_acumulado_desc, columnas_desc_para_filtrado, query_or_simple_actual, None) # Negativos globales se aplican al final de todo
-                    if error_sub_busqueda_desc: # Si hay error en la sub-búsqueda en descripciones
+                    df_resultado_acumulado_desc, error_sub_busqueda_desc = self._procesar_busqueda_en_df_objetivo(df_resultado_acumulado_desc, columnas_desc_para_filtrado, query_or_simple_actual, None)
+                    if error_sub_busqueda_desc:
                         hay_error_en_busqueda_de_parte_o_desc = True; error_msg_critico_partes = error_sub_busqueda_desc
                         logger.error(f"Error en sub-búsqueda OR para '{query_or_simple_actual}': {error_sub_busqueda_desc}"); break
-                    if df_resultado_acumulado_desc.empty: # Si no hay resultados después del filtro
+                    if df_resultado_acumulado_desc.empty:
                         logger.info(f"Filtro OR para '{parte_and_actual_str}' no encontró coincidencias en resultados acumulados. Búsqueda AND final será vacía."); break
                 
-                # Prepara FCDs para mostrar en la UI
                 if fcds_indices_acumulados and self.datos_diccionario is not None:
                     fcds_obtenidos_final_para_ui = self.datos_diccionario.loc[list(fcds_indices_acumulados)].drop_duplicates().copy()
                     indices_fcds_a_resaltar_en_preview = fcds_obtenidos_final_para_ui.index.tolist()
-                else: # Si no hay FCDs acumulados o diccionario no está cargado
+                else:
                     fcds_obtenidos_final_para_ui = pd.DataFrame(columns=self.datos_diccionario.columns if self.datos_diccionario is not None else [])
                     indices_fcds_a_resaltar_en_preview = []
                 
-                if hay_error_en_busqueda_de_parte_o_desc: # Si hubo error en el proceso
+                if hay_error_en_busqueda_de_parte_o_desc:
                     return df_vacio_para_descripciones, OrigenResultados.TERMINO_INVALIDO, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, error_msg_critico_partes
-                if not todas_partes_and_produjeron_terminos_validos or df_resultado_acumulado_desc.empty: # Si alguna parte no produjo términos o no hay resultados finales en descripciones
+                if not todas_partes_and_produjeron_terminos_validos or df_resultado_acumulado_desc.empty:
                     origen_fallo_and = OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS if not todas_partes_and_produjeron_terminos_validos else OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC
                     logger.info(f"Búsqueda AND '{terminos_positivos_globales}' no produjo resultados finales en descripciones (Origen: {origen_fallo_and.name}).")
                     return df_vacio_para_descripciones, origen_fallo_and, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
                 
-                resultados_desc_final_filtrado_and = df_resultado_acumulado_desc # Resultados finales de descripción para el AND
-                # Aplica negativos globales si existen y hay resultados
+                resultados_desc_final_filtrado_and = df_resultado_acumulado_desc
                 if not resultados_desc_final_filtrado_and.empty and terminos_negativos_globales:
                     logger.info(f"Aplicando negativos globales {terminos_negativos_globales} a {len(resultados_desc_final_filtrado_and)} filas (resultado del AND de ORs)")
                     df_temp_neg, _, _ = self._aplicar_negaciones_y_extraer_positivos(
                         resultados_desc_final_filtrado_and, 
                         columnas_desc_para_filtrado, 
-                        " ".join([f"#{neg}" for neg in terminos_negativos_globales]) # Construye una query solo de negativos
+                        " ".join([f"#{neg}" for neg in terminos_negativos_globales])
                     )
-                    resultados_desc_final_filtrado_and = df_temp_neg # Actualiza los resultados
+                    resultados_desc_final_filtrado_and = df_temp_neg
                 
                 logger.info(f"Búsqueda AND '{terminos_positivos_globales}' vía diccionario produjo {len(resultados_desc_final_filtrado_and)} resultados en descripciones.")
                 return resultados_desc_final_filtrado_and, OrigenResultados.VIA_DICCIONARIO_CON_RESULTADOS_DESC, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
+                 # --- FIN LÓGICA AND DE ALTO NIVEL ---
             else: # Flujo simple (no AND de alto nivel en positivos globales) o búsqueda puramente negativa
                 origen_propuesto_flujo_simple: OrigenResultados = OrigenResultados.NINGUNO
-                fcds_query_simple: Optional[pd.DataFrame] = None
+                fcds_query_simple: Optional[pd.DataFrame] = None # FCDs del intento 1
                 
-                if terminos_positivos_globales.strip(): # Si hay términos positivos (flujo simple)
+                # Intento 1: Búsqueda estándar en diccionario (numérico + unidad, o solo texto, o solo negación)
+                if terminos_positivos_globales.strip(): # Si hay términos positivos
                     logger.info(f"BUSCAR EN DICC (FCDs) - Positivos (sin AND de alto nivel): Query='{terminos_positivos_globales}'")
                     origen_propuesto_flujo_simple = OrigenResultados.VIA_DICCIONARIO_CON_RESULTADOS_DESC
                     try:
-                        # Negativos globales se aplican en descripciones, no en esta búsqueda de FCDs
                         fcds_temp, error_dic_pos = self._procesar_busqueda_en_df_objetivo(self.datos_diccionario, columnas_dic_para_fcds, terminos_positivos_globales, None)
                         if error_dic_pos: return None, OrigenResultados.TERMINO_INVALIDO, None, None, error_dic_pos
                         fcds_query_simple = fcds_temp
                     except Exception as e_dic_pos:
                         logger.exception("Excepción búsqueda en diccionario (positivos simples)."); return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, None, None, f"Error motor (dicc-positivos simples): {e_dic_pos}"
-                elif terminos_negativos_globales: # Si la query original era puramente negativa (ej. "#termino1 #termino2")
+                elif terminos_negativos_globales: # Si la query original era puramente negativa
                     logger.info(f"BUSCAR EN DICC (FCDs) - Puramente Negativo: Negs Globales={terminos_negativos_globales}")
                     origen_propuesto_flujo_simple = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC
                     try:
-                        # Busca en el diccionario aplicando solo los negativos. Los FCDs resultantes NO deben contener los términos negados.
                         query_solo_negados_fcd = " ".join([f"#{neg}" for neg in terminos_negativos_globales])
                         fcds_temp, error_dic_neg = self._procesar_busqueda_en_df_objetivo(self.datos_diccionario, columnas_dic_para_fcds, query_solo_negados_fcd, None)
                         if error_dic_neg: return None, OrigenResultados.TERMINO_INVALIDO, None, None, error_dic_neg
                         fcds_query_simple = fcds_temp
                     except Exception as e_dic_neg:
                         logger.exception("Excepción búsqueda en diccionario (puramente negativo)."); return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, None, None, f"Error motor (dicc-negativo): {e_dic_neg}"
-                else: # No hay términos positivos ni negativos (ya manejado por el chequeo de termino_busqueda_original vacío)
+                else: # Query completamente vacía (ya manejado, pero por completitud)
                     return df_vacio_para_descripciones, OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS, None, None, None
 
-                fcds_obtenidos_final_para_ui = fcds_query_simple # FCDs para mostrar en la UI
-                if fcds_obtenidos_final_para_ui is not None and not fcds_obtenidos_final_para_ui.empty: # Si se encontraron FCDs
-                    indices_fcds_a_resaltar_en_preview = fcds_obtenidos_final_para_ui.index.tolist()
-                    logger.info(f"FCDs obtenidas del diccionario (flujo simple/negativo): {len(fcds_obtenidos_final_para_ui)} filas.")
-                else: # No se encontraron FCDs
-                    logger.info(f"No se encontraron FCDs en diccionario para '{termino_busqueda_original}' (flujo simple/negativo).")
-                    return df_vacio_para_descripciones, OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
+                fcds_obtenidos_final_para_ui = fcds_query_simple # Resultado del Intento 1
                 
-                if self.datos_descripcion is None: return None, OrigenResultados.ERROR_CARGA_DESCRIPCION, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, "Descripciones no cargadas."
-                
-                terminos_para_buscar_en_descripcion_set: Set[str] = set() # Extrae términos de los FCDs para buscar en descripciones
-                for _, fila_fcd in fcds_obtenidos_final_para_ui.iterrows(): terminos_para_buscar_en_descripcion_set.update(self._extraer_terminos_de_fila_completa(fila_fcd))
-                
-                if not terminos_para_buscar_en_descripcion_set: # Si no se extrajeron términos válidos de los FCDs
-                    logger.info("FCDs encontrados (flujo simple/negativo), pero no se extrajeron términos para descripciones.")
-                    origen_final_sinterm = OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS
-                    if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC: 
-                        origen_final_sinterm = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC
-                    return df_vacio_para_descripciones, origen_final_sinterm, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
-
-                logger.info(f"Términos para desc ({len(terminos_para_buscar_en_descripcion_set)} únicos, muestra): {sorted(list(terminos_para_buscar_en_descripcion_set))[:10]}...")
-                terminos_or_con_comillas_desc = [f'"{t}"' if " " in t and not (t.startswith('"') and t.endswith('"')) else t for t in terminos_para_buscar_en_descripcion_set if t]
-                query_or_para_desc_simple = " | ".join(terminos_or_con_comillas_desc) # Construye query OR para descripciones
-                
-                if not query_or_para_desc_simple: # Si la query OR para descripciones está vacía
-                    origen_q_vacia = OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS
-                    if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC:
-                        origen_q_vacia = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC
-                    return df_vacio_para_descripciones, origen_q_vacia, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, "Query OR para descripciones vacía."
-
-                columnas_desc_final_simple, err_cols_desc_final_simple = self._obtener_nombres_columnas_busqueda_df(self.datos_descripcion, [], "descripcion_fcds")
-                if not columnas_desc_final_simple: return None, OrigenResultados.ERROR_CONFIGURACION_COLUMNAS_DESC, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, err_cols_desc_final_simple
-                
-                # Negativos globales se aplican aquí SOLO si la búsqueda original de FCDs NO era puramente negativa.
-                # Si era puramente negativa, los FCDs ya están filtrados por esos negativos.
-                negativos_a_aplicar_en_desc = terminos_negativos_globales if origen_propuesto_flujo_simple != OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC else []
-
-                logger.info(f"BUSCAR EN DESC (vía FCD simple/negativa): Query='{query_or_para_desc_simple[:200]}...'. Neg. Adicionales a aplicar en Desc: {negativos_a_aplicar_en_desc}")
-                try:
-                    # Busca en descripciones usando la query OR y los negativos globales (si aplica)
-                    resultados_desc_final_simple, error_busqueda_desc_simple = self._procesar_busqueda_en_df_objetivo(
-                        self.datos_descripcion, 
-                        columnas_desc_final_simple, 
-                        query_or_para_desc_simple, 
-                        terminos_negativos_adicionales=negativos_a_aplicar_en_desc
-                    )
-                    if error_busqueda_desc_simple: return df_vacio_para_descripciones, OrigenResultados.TERMINO_INVALIDO, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, error_busqueda_desc_simple
+                # Flujo Alternativo (Intento 2)
+                # Se activa si Intento 1 falló (no hay FCDs) Y la query original tenía una unidad/filtro numérico.
+                if (fcds_obtenidos_final_para_ui is None or fcds_obtenidos_final_para_ui.empty) and filtro_numerico_original_de_query and filtro_numerico_original_de_query.get("unidad_busqueda"):
+                    unidad_original_query_canonica = filtro_numerico_original_de_query["unidad_busqueda"]
+                    logger.info(f"Intento 1 falló. Iniciando Intento 2: buscando FCDs solo por unidad '{unidad_original_query_canonica}' en diccionario.")
                     
-                    if resultados_desc_final_simple is None or resultados_desc_final_simple.empty: # Si no hay resultados en descripciones
-                        origen_res_desc_vacio_simple = OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC
+                    # Crea una query solo con la unidad para buscar en el diccionario
+                    # Usa la forma normalizada de la unidad original de la query
+                    query_solo_unidad = str(unidad_original_query_canonica) # Ya está normalizada por extractor_magnitud en _analizar_terminos
+                                        
+                    fcds_alternativos, error_dic_alt = self._procesar_busqueda_en_df_objetivo(
+                        self.datos_diccionario, columnas_dic_para_fcds, query_solo_unidad, None
+                    )
+                    if error_dic_alt: # Si hay error en esta búsqueda alternativa de FCDs
+                        logger.warning(f"Error en búsqueda alternativa de FCDs por unidad '{query_solo_unidad}': {error_dic_alt}")
+                        # Se revierte a "No en diccionario" como si el intento 2 no hubiera ocurrido o fallado.
+                        return df_vacio_para_descripciones, OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS, None, None, None # fcds_obtenidos_final_para_ui es None o vacío
+
+                    if fcds_alternativos is not None and not fcds_alternativos.empty:
+                        logger.info(f"Intento 2: Encontrados {len(fcds_alternativos)} FCDs alternativos basados solo en la unidad '{query_solo_unidad}'.")
+                        fcds_obtenidos_final_para_ui = fcds_alternativos # Estos son los FCDs que se mostrarán
+                        indices_fcds_a_resaltar_en_preview = fcds_obtenidos_final_para_ui.index.tolist()
+                        
+                        if self.datos_descripcion is None: return None, OrigenResultados.ERROR_CARGA_DESCRIPCION, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, "Descripciones no cargadas."
+                        
+                        terminos_alt_para_desc_set: Set[str] = set() # Extrae términos de estos FCDs alternativos
+                        for _, fila_fcd_alt in fcds_alternativos.iterrows(): terminos_alt_para_desc_set.update(self._extraer_terminos_de_fila_completa(fila_fcd_alt))
+
+                        if not terminos_alt_para_desc_set: # Si no se extraen términos
+                            logger.info("Intento 2: FCDs alternativos encontrados, pero no se extrajeron términos para descripciones.")
+                            return df_vacio_para_descripciones, OrigenResultados.VIA_DICCIONARIO_UNIDAD_SIN_RESULTADOS_DESC, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
+                        
+                        query_or_alt_para_desc = " | ".join([f'"{t}"' if " " in t else t for t in terminos_alt_para_desc_set if t])
+                        if not query_or_alt_para_desc: # Si la query OR es vacía
+                             return df_vacio_para_descripciones, OrigenResultados.VIA_DICCIONARIO_UNIDAD_SIN_RESULTADOS_DESC, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, "Query OR para descripciones (alternativa) vacía."
+
+                        columnas_desc_alt, err_cols_desc_alt = self._obtener_nombres_columnas_busqueda_df(self.datos_descripcion, [], "descripcion_fcds_alt")
+                        if not columnas_desc_alt: return None, OrigenResultados.ERROR_CONFIGURACION_COLUMNAS_DESC, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, err_cols_desc_alt
+                        
+                        logger.info(f"BUSCAR EN DESC (Intento 2 - vía FCDs por unidad): Query sinónimos='{query_or_alt_para_desc[:100]}...'. Aplicando filtro numérico original: {filtro_numerico_original_de_query} y Neg. Globales: {terminos_negativos_globales}")
+                        # Busca en descripciones usando sinónimos Y APLICANDO el filtro numérico original de la query
+                        # Los términos negativos globales también se aplican.
+                        resultados_desc_alt, error_desc_alt = self._procesar_busqueda_en_df_objetivo(
+                            self.datos_descripcion, columnas_desc_alt, 
+                            query_or_alt_para_desc, # Query de sinónimos
+                            terminos_negativos_adicionales=terminos_negativos_globales, # Negativos globales
+                            filtro_numerico_original_desc=filtro_numerico_original_de_query # Filtro numérico de la query original
+                        )
+                        if error_desc_alt: return df_vacio_para_descripciones, OrigenResultados.TERMINO_INVALIDO, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, error_desc_alt
+                        if resultados_desc_alt is None or resultados_desc_alt.empty:
+                            return df_vacio_para_descripciones, OrigenResultados.VIA_DICCIONARIO_UNIDAD_SIN_RESULTADOS_DESC, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
+                        else:
+                            return resultados_desc_alt, OrigenResultados.VIA_DICCIONARIO_UNIDAD_Y_NUMERICO_EN_DESC, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
+                    else: # Si el Intento 2 tampoco encontró FCDs por unidad
+                        logger.info(f"Intento 2: No se encontraron FCDs basados solo en la unidad '{query_solo_unidad}'.")
+                        # Se revierte a "No en diccionario"
+                        return df_vacio_para_descripciones, OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS, None, None, None # fcds_obtenidos_final_para_ui es None o vacío
+                
+                # Si Intento 1 tuvo éxito (fcds_obtenidos_final_para_ui no es None y no está vacío) y no se activó el flujo alternativo:
+                if fcds_obtenidos_final_para_ui is not None and not fcds_obtenidos_final_para_ui.empty:
+                    indices_fcds_a_resaltar_en_preview = fcds_obtenidos_final_para_ui.index.tolist()
+                    logger.info(f"FCDs obtenidas del diccionario (flujo estándar simple/negativo): {len(fcds_obtenidos_final_para_ui)} filas.")
+                    
+                    if self.datos_descripcion is None: return None, OrigenResultados.ERROR_CARGA_DESCRIPCION, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, "Descripciones no cargadas."
+                    
+                    terminos_para_buscar_en_descripcion_set: Set[str] = set()
+                    for _, fila_fcd in fcds_obtenidos_final_para_ui.iterrows(): terminos_para_buscar_en_descripcion_set.update(self._extraer_terminos_de_fila_completa(fila_fcd))
+                    
+                    if not terminos_para_buscar_en_descripcion_set:
+                        logger.info("FCDs encontrados (flujo estándar), pero no se extrajeron términos para descripciones.")
+                        origen_final_sinterm = OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS
                         if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC:
-                            origen_res_desc_vacio_simple = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC
-                        return df_vacio_para_descripciones, origen_res_desc_vacio_simple, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
-                    else: # Si hay resultados
-                        return resultados_desc_final_simple, origen_propuesto_flujo_simple, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
-                except Exception as e_desc_proc_simple: # Captura cualquier otra excepción
-                    logger.exception("Excepción búsqueda final en descripciones (flujo simple/negativo)."); return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, f"Error motor (desc final simple/negativo): {e_desc_proc_simple}"
+                            origen_final_sinterm = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC
+                        return df_vacio_para_descripciones, origen_final_sinterm, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
+
+                    logger.info(f"Términos para desc ({len(terminos_para_buscar_en_descripcion_set)} únicos, muestra): {sorted(list(terminos_para_buscar_en_descripcion_set))[:10]}...")
+                    terminos_or_con_comillas_desc = [f'"{t}"' if " " in t and not (t.startswith('"') and t.endswith('"')) else t for t in terminos_para_buscar_en_descripcion_set if t]
+                    query_or_para_desc_simple = " | ".join(terminos_or_con_comillas_desc)
+                    
+                    if not query_or_para_desc_simple:
+                        origen_q_vacia = OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS
+                        if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC:
+                            origen_q_vacia = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC
+                        return df_vacio_para_descripciones, origen_q_vacia, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, "Query OR para descripciones vacía."
+
+                    columnas_desc_final_simple, err_cols_desc_final_simple = self._obtener_nombres_columnas_busqueda_df(self.datos_descripcion, [], "descripcion_fcds")
+                    if not columnas_desc_final_simple: return None, OrigenResultados.ERROR_CONFIGURACION_COLUMNAS_DESC, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, err_cols_desc_final_simple
+                    
+                    # Negativos globales de la query original se aplican aquí en las descripciones
+                    # (a menos que la búsqueda de FCDs fuera puramente negativa, en cuyo caso los negativos ya actuaron)
+                    negativos_a_aplicar_en_desc = terminos_negativos_globales if origen_propuesto_flujo_simple != OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC else []
+                    
+                    logger.info(f"BUSCAR EN DESC (vía FCD estándar): Query='{query_or_para_desc_simple[:200]}...'. Neg. Adicionales a aplicar en Desc: {negativos_a_aplicar_en_desc}")
+                    try:
+                        resultados_desc_final_simple, error_busqueda_desc_simple = self._procesar_busqueda_en_df_objetivo(
+                            self.datos_descripcion, columnas_desc_final_simple, 
+                            query_or_para_desc_simple, 
+                            terminos_negativos_adicionales=negativos_a_aplicar_en_desc
+                        )
+                        if error_busqueda_desc_simple: return df_vacio_para_descripciones, OrigenResultados.TERMINO_INVALIDO, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, error_busqueda_desc_simple
+                        
+                        if resultados_desc_final_simple is None or resultados_desc_final_simple.empty:
+                            origen_res_desc_vacio_simple = OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC
+                            if origen_propuesto_flujo_simple == OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC:
+                                origen_res_desc_vacio_simple = OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC
+                            return df_vacio_para_descripciones, origen_res_desc_vacio_simple, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
+                        else: 
+                            return resultados_desc_final_simple, origen_propuesto_flujo_simple, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, None
+                    except Exception as e_desc_proc_simple:
+                        logger.exception("Excepción búsqueda final en descripciones (flujo estándar)."); return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, fcds_obtenidos_final_para_ui, indices_fcds_a_resaltar_en_preview, f"Error motor (desc final estándar): {e_desc_proc_simple}"
+                else: # Si el Intento 1 no dio FCDs y el flujo alternativo no se activó o también falló en dar FCDs
+                    logger.info(f"No se encontraron FCDs en diccionario para '{termino_busqueda_original}' tras todos los intentos.")
+                    return df_vacio_para_descripciones, OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS, None, None, None
+
+
         else: # Búsqueda directa en descripciones (no vía diccionario)
             if self.datos_descripcion is None: return None, OrigenResultados.ERROR_CARGA_DESCRIPCION, None, None, "Descripciones no cargadas."
             columnas_desc_directo, err_cols_desc_directo = self._obtener_nombres_columnas_busqueda_df(self.datos_descripcion, [], "descripcion")
             if not columnas_desc_directo: return None, OrigenResultados.ERROR_CONFIGURACION_COLUMNAS_DESC, None, None, err_cols_desc_directo
             try:
                 logger.info(f"BUSCAR EN DESC (DIRECTO): Query '{termino_busqueda_original}'")
-                # Procesa la búsqueda directamente en descripciones. Los negativos de la query original se manejan dentro de _procesar_busqueda_en_df_objetivo.
                 resultados_directos_desc, error_busqueda_desc_dir = self._procesar_busqueda_en_df_objetivo(self.datos_descripcion, columnas_desc_directo, termino_busqueda_original, None)
                 if error_busqueda_desc_dir: return None, OrigenResultados.TERMINO_INVALIDO, None, None, error_busqueda_desc_dir
                 if resultados_directos_desc is None or resultados_directos_desc.empty: return df_vacio_para_descripciones, OrigenResultados.DIRECTO_DESCRIPCION_VACIA, None, None, None
                 else: return resultados_directos_desc, OrigenResultados.DIRECTO_DESCRIPCION_CON_RESULTADOS, None, None, None
-            except Exception as e_desc_dir_proc: # Captura cualquier otra excepción
+            except Exception as e_desc_dir_proc:
                 logger.exception("Excepción búsqueda directa en descripciones."); return None, OrigenResultados.ERROR_BUSQUEDA_INTERNA_MOTOR, None, None, f"Error motor (desc directa): {e_desc_dir_proc}"
 
 # --- Interfaz Gráfica ---
@@ -939,7 +1094,7 @@ class InterfazGrafica(tk.Tk):
 
     def __init__(self):
         super().__init__() # Llama al constructor de la clase padre tk.Tk
-        self.title("Buscador Avanzado v1.10.1 (Parseo Numérico Mejorado)") # Título de la ventana
+        self.title("Buscador Avanzado v1.10.2 (Fallback Unidad Diccionario)") # Actualizado
         self.geometry("1250x800") # Dimensiones iniciales de la ventana
         self.config: Dict[str, Any] = self._cargar_configuracion_app() # Carga la configuración de la aplicación
         # Obtiene los índices de columnas para la vista previa del diccionario desde la configuración
@@ -967,7 +1122,7 @@ class InterfazGrafica(tk.Tk):
         self._actualizar_mensaje_barra_estado("Listo. Cargue Diccionario y Descripciones.") # Mensaje inicial en barra de estado
         self._deshabilitar_botones_operadores() # Deshabilita botones de operadores inicialmente
         self._actualizar_estado_general_botones_y_controles() # Actualiza el estado de todos los botones y controles
-        logger.info(f"Interfaz Gráfica (v1.10.1 Parseo Numérico Mejorado) inicializada.")
+        logger.info(f"Interfaz Gráfica (v1.10.2 Fallback Unidad Diccionario) inicializada.")
 
     def _try_except_wrapper(self, func, *args, **kwargs):
         # Envoltorio para manejar excepciones en funciones de la UI, mostrando un mensaje de error y registrando el traceback.
@@ -1106,7 +1261,11 @@ class InterfazGrafica(tk.Tk):
                        "2. Sinónimos: De las FCDs de 'A' se extraen Sinónimos_A. De las FCDs de 'B' se extraen Sinónimos_B.\n"
                        "3. Búsqueda en Descripciones: Se buscan filas que contengan (ALGÚN Sinónimo_A) Y (ALGÚN Sinónimo_B) mediante filtrado secuencial.\n"
                        "4. Negativos (#global): Se aplican al final sobre los resultados de descripciones.\n"
-                       "5. Falla en Diccionario: Si 'A' o 'B' no da FCDs/sinónimos, se ofrece búsqueda directa de 'A+B' en Descripciones.")
+                       "5. Falla en Diccionario: Si 'A' o 'B' no da FCDs/sinónimos, o si la búsqueda numérica inicial en FCDs no da resultados pero la query tenía unidad,\n   se ofrece una búsqueda directa de la query original en Descripciones o se puede activar un flujo alternativo de búsqueda por unidad en Diccionario.\n\n"
+                       "Flujo Alternativo por Unidad (si búsqueda numérica en Diccionario falla pero la query tenía unidad):\n"
+                       "1. Se buscan FCDs que contengan la unidad original de la query.\n"
+                       "2. Se extraen sinónimos de estas FCDs.\n"
+                       "3. Se buscan estos sinónimos en Descripciones, PERO aplicando adicionalmente la condición numérica original de la query a los valores encontrados en las descripciones.")
         messagebox.showinfo("Ayuda - Sintaxis y Flujo", texto_ayuda) # Muestra el cuadro de diálogo de información
 
     def _configurar_tags_estilo_treeview_app(self):
@@ -1234,7 +1393,7 @@ class InterfazGrafica(tk.Tk):
             if self.origen_principal_resultados.es_via_diccionario and \
                ((self.fcds_de_ultima_busqueda is not None and not self.fcds_de_ultima_busqueda.empty) or \
                 (self.desc_finales_de_ultima_busqueda is not None and not self.desc_finales_de_ultima_busqueda.empty and \
-                 self.origen_principal_resultados in [OrigenResultados.VIA_DICCIONARIO_CON_RESULTADOS_DESC, OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC] )):
+                 self.origen_principal_resultados in [OrigenResultados.VIA_DICCIONARIO_CON_RESULTADOS_DESC, OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC, OrigenResultados.VIA_DICCIONARIO_UNIDAD_Y_NUMERICO_EN_DESC] )): # Añadido nuevo origen
                 salvar_ok=True
             elif (self.origen_principal_resultados.es_directo_descripcion or self.origen_principal_resultados == OrigenResultados.DIRECTO_DESCRIPCION_VACIA) and \
                  self.desc_finales_de_ultima_busqueda is not None:
@@ -1331,7 +1490,7 @@ class InterfazGrafica(tk.Tk):
         # Manejo de diferentes orígenes de resultados y errores
         if err_msg and origen.es_error_operacional:messagebox.showerror("Error Motor",f"Error interno: {err_msg}");self.resultados_actuales=pd.DataFrame(columns=df_desc_cols)
         elif origen.es_error_carga or origen.es_error_configuracion or origen.es_termino_invalido:messagebox.showerror("Error Búsqueda",err_msg or f"Error: {origen.name}");self.resultados_actuales=pd.DataFrame(columns=df_desc_cols)
-        elif origen in [OrigenResultados.VIA_DICCIONARIO_CON_RESULTADOS_DESC, OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC]:
+        elif origen in [OrigenResultados.VIA_DICCIONARIO_CON_RESULTADOS_DESC, OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_CON_RESULTADOS_DESC, OrigenResultados.VIA_DICCIONARIO_UNIDAD_Y_NUMERICO_EN_DESC]: #Añadido nuevo origen
             self.resultados_actuales=res_df;self._actualizar_mensaje_barra_estado(f"'{term_ui}': {len(fcds) if fcds is not None else 0} en Dic, {len(res_df) if res_df is not None else 0} en Desc.")
         elif origen==OrigenResultados.DICCIONARIO_SIN_COINCIDENCIAS: # Si no se encontró en diccionario
             self.resultados_actuales=res_df ;self._actualizar_mensaje_barra_estado(f"'{term_ui}': No en Diccionario.");
@@ -1339,10 +1498,12 @@ class InterfazGrafica(tk.Tk):
             if messagebox.askyesno("Búsqueda Alternativa",f"'{term_ui}' no encontrado en Diccionario.\n\n¿Buscar '{term_ui}' directamente en Descripciones?"):
                 self._try_except_wrapper(self._buscar_directo_en_descripciones_y_actualizar_ui, term_ui, df_desc_cols)
             else: self._actualizar_estado_general_botones_y_controles() # Actualiza UI si no
-        elif origen in [OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC, OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS, OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC]:
+        elif origen in [OrigenResultados.VIA_DICCIONARIO_SIN_RESULTADOS_DESC, OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS, OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC, OrigenResultados.VIA_DICCIONARIO_UNIDAD_SIN_RESULTADOS_DESC]: #Añadido nuevo origen
             # Si se encontraron FCDs pero no resultados en descripciones o términos válidos
             self.resultados_actuales=res_df;num_fcds_i=len(fcds) if fcds is not None else 0;msg_fcd_i=f"{num_fcds_i} en Diccionario"
             msg_desc_i="pero no se extrajeron términos válidos para Desc." if origen in [OrigenResultados.VIA_DICCIONARIO_SIN_TERMINOS_VALIDOS, OrigenResultados.VIA_DICCIONARIO_PURAMENTE_NEGATIVA_SIN_RESULTADOS_DESC] else "pero 0 resultados en Desc."
+            if origen == OrigenResultados.VIA_DICCIONARIO_UNIDAD_SIN_RESULTADOS_DESC:
+                 msg_desc_i = "pero no se encontraron coincidencias numéricas/de unidad en Desc."
             self._actualizar_mensaje_barra_estado(f"'{term_ui}': {msg_fcd_i}, {msg_desc_i.replace('.','')} en Desc.")
             # Pregunta al usuario si desea buscar directamente en descripciones
             if messagebox.askyesno("Búsqueda Alternativa",f"{msg_fcd_i} para '{term_ui}', {msg_desc_i}\n\n¿Buscar '{term_ui}' directamente en Descripciones?"):
@@ -1443,13 +1604,12 @@ class InterfazGrafica(tk.Tk):
         txt=self.texto_busqueda_var.get();cur_pos=self.entrada_busqueda.index(tk.INSERT) # Texto actual y posición del cursor
         last_char_rel=txt[:cur_pos].strip()[-1:] if txt[:cur_pos].strip() else "" # Último carácter relevante antes del cursor
         
-        ops_logicos=["+","|","/"]; ops_comp_pref=[">","<"]; # Define tipos de operadores
+        ops_logicos=["+","|"]; ops_comp_pref=[">","<"]; # Define tipos de operadores. '/' ya no es OR explícito aquí.
         
         # Lógica para deshabilitar operadores según el último carácter
         if not last_char_rel or last_char_rel in ops_logicos + ["#","<",">","=","-"]: # Si es inicio o después de operador lógico/negación/comparación
             if self.op_buttons.get("+"): self.op_buttons["+"]["state"]="disabled"
             if self.op_buttons.get("|"): self.op_buttons["|"]["state"]="disabled"
-            # if self.op_buttons.get("/"): self.op_buttons["/"]["state"]="disabled" # '/' ya no es OR
         
         if last_char_rel and last_char_rel not in ops_logicos + [" "]: # Si el último carácter no es operador lógico ni espacio
              if self.op_buttons.get("#"): self.op_buttons["#"]["state"]="disabled" # Deshabilita negación
@@ -1463,12 +1623,12 @@ class InterfazGrafica(tk.Tk):
         if last_char_rel.isdigit(): # Si el último es un dígito
             for opk_pref in ops_comp_pref + ["=","#"]: # Deshabilita operadores de prefijo numérico y negación
                  if self.op_buttons.get(opk_pref): self.op_buttons[opk_pref]["state"]="disabled"
-        elif not last_char_rel or last_char_rel in [" ","+","|","/"]: # Si es inicio, espacio u operador lógico
+        elif not last_char_rel or last_char_rel in [" ","+","|"]: # Si es inicio, espacio u operador lógico
             if self.op_buttons.get("-"): self.op_buttons["-"]["state"]="disabled" # Deshabilita el guion de rango
 
     def _insertar_operador_validado(self,op_limpio: str):
         # Inserta un operador en el campo de búsqueda con los espacios adecuados.
-        ops_con_espacio_alrededor = ["+", "|", "/"] 
+        ops_con_espacio_alrededor = ["+", "|"] 
         texto_a_insertar: str
         if op_limpio in ops_con_espacio_alrededor: texto_a_insertar = f" {op_limpio} " # Operadores lógicos con espacios
         elif op_limpio == "-": texto_a_insertar = f"{op_limpio}" # Guion de rango, sin espacios forzados
@@ -1498,7 +1658,7 @@ class InterfazGrafica(tk.Tk):
 
 # --- Punto de Entrada Principal de la Aplicación ---
 if __name__ == "__main__":
-    LOG_FILE_NAME = "Buscador_Avanzado_App_v1.10.1.log" # Nombre del archivo de log, versión actualizada
+    LOG_FILE_NAME = "Buscador_Avanzado_App_v1.10.2.log" # Versión con Fallback Unidad Diccionario
     # Configuración básica del logging para guardar en archivo y mostrar en consola
     logging.basicConfig(
         level=logging.DEBUG, # Nivel mínimo de mensajes a registrar
@@ -1509,7 +1669,7 @@ if __name__ == "__main__":
         ])
     root_logger = logging.getLogger() # Obtiene el logger raíz
     # Mensaje de inicio de la aplicación
-    root_logger.info(f"--- Iniciando Buscador Avanzado v1.10.1 (Parseo Numérico Mejorado) (Script: {Path(__file__).name}) ---")
+    root_logger.info(f"--- Iniciando Buscador Avanzado v1.10.2 (Fallback Unidad Diccionario) (Script: {Path(__file__).name}) ---")
     root_logger.info(f"Logs siendo guardados en: {Path(LOG_FILE_NAME).resolve()}")
 
     # Verificación de dependencias
