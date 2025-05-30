@@ -1,144 +1,40 @@
-# Buscador v0.7.5
+# Buscador Avanzado Modularizado
 
-![Python](https://img.shields.io/badge/Python-3.6%2B-blue)
-![Tkinter](https://img.shields.io/badge/GUI-Tkinter-green)
-![Pandas](https://img.shields.io/badge/Data-Pandas-yellow)
+## Descripción General
 
-## 📋 Descripción
+El Buscador Avanzado Modularizado es una aplicación de escritorio desarrollada en Python con una interfaz gráfica construida en Tkinter. Su propósito principal es permitir a los usuarios realizar búsquedas complejas y detalladas dentro de archivos de datos en formato Excel.
 
-Buscador es una aplicación de escritorio para búsquedas avanzadas en archivos Excel. Permite realizar consultas complejas utilizando operadores lógicos, comparaciones numéricas, rangos y negaciones. La aplicación está diseñada para trabajar con dos tipos de archivos:
+La aplicación utiliza dos archivos Excel principales:
+1.  **Archivo de Diccionario**: Este archivo no solo contiene términos de búsqueda (Formas Canónicas del Diccionario - FCDs) y sus sinónimos, sino que también se utiliza para definir y normalizar unidades y magnitudes, mejorando la precisión de las búsquedas numéricas.
+2.  **Archivo de Descripciones**: Es el archivo de datos principal donde se realizan las búsquedas. Los resultados finales se extraen de este archivo.
 
-- **Diccionario**: Archivo Excel que contiene términos de referencia.
-- **Descripciones**: Archivo Excel con datos que se desean consultar.
+El motor de búsqueda soporta una sintaxis rica que incluye operadores lógicos (AND, OR), negación de términos, búsquedas numéricas específicas (comparaciones como >, <, >=, <=, =) con reconocimiento de unidades, búsquedas por rangos numéricos y búsqueda de frases exactas.
 
-La aplicación puede buscar directamente en las descripciones o utilizar el diccionario como intermediario para encontrar coincidencias más relevantes.
+## Características Principales
 
-## ✨ Características
+* **Carga Dinámica de Archivos**: Permite al usuario cargar archivos Excel (`.xlsx`, `.xls`) para el diccionario y los datos de descripción en tiempo de ejecución.
+* **Motor de Búsqueda Potente**:
+    * **Operadores Lógicos**: Soporte para `+` (AND) y `|` (OR) para combinar términos de búsqueda.
+    * **Negación**: Exclusión de términos o frases usando el prefijo `#` (ej., `#obsoleto` o `# "fuera de stock"`).
+    * **Búsquedas Numéricas**:
+        * Comparaciones: `>`, `<`, `>=`, `<=`, `=` (ej., `>100W`, `<=50V`). Las unidades son opcionales pero mejoran la precisión si se definen en el diccionario.
+        * Rangos: Definición de rangos numéricos (ej., `10-20KG`, `2.5-3.0mm`).
+    * **Frases Exactas**: Búsqueda de secuencias literales de palabras encerrándolas entre comillas dobles (ej., `"rack 19 pulgadas"`).
+* **Normalización de Texto**: Para búsquedas más robustas, el texto de las consultas y de los datos se normaliza (conversión a mayúsculas, eliminación de tildes y caracteres especiales no relevantes).
+* **Reconocimiento y Normalización de Magnitudes**: Utiliza el archivo de diccionario para construir un mapeo dinámico de unidades y sus sinónimos a una forma canónica, permitiendo búsquedas como `>10 voltios` aunque en los datos aparezca como `>10v`.
+* **Interfaz Gráfica de Usuario (GUI)**:
+    * Desarrollada con Tkinter, proporcionando una experiencia de usuario clara.
+    * Visualización interactiva de los datos del diccionario y los resultados de la búsqueda en tablas.
+    * Resaltado de las Formas Canónicas del Diccionario (FCDs) que coinciden con la consulta en la vista previa del diccionario.
+* **Flujo de Búsqueda Flexible**:
+    * **Vía Diccionario (por defecto)**: La consulta se busca primero en el diccionario. Los sinónimos encontrados se usan para buscar en las descripciones. Se aplica la condición numérica original (si la hubo en la query) y negaciones globales.
+    * **Manejo de AND complejo**: Para consultas como `A + B`, se buscan sinónimos para A y para B en el diccionario, y luego se buscan descripciones que contengan sinónimos de A *Y* sinónimos de B.
+    * **Flujo Alternativo por Unidad**: Si una búsqueda numérica con unidad (ej. `>10V`) no encuentra FCDs directos, el sistema intenta buscar FCDs que contengan solo la unidad (ej. `V`), y luego aplica el filtro numérico original (`>10`) a los sinónimos encontrados en las descripciones.
+    * **Búsqueda Directa**: Opción para buscar la consulta original directamente en el archivo de descripciones si la búsqueda vía diccionario no produce los resultados esperados.
+* **Exportación de Resultados**: Los resultados de la búsqueda (de la tabla de descripciones) pueden ser exportados a formatos `.xlsx` o `.csv`.
+* **Configuración Persistente**: Guarda la ruta de los últimos archivos cargados y otras configuraciones de la UI en un archivo `config_buscador_avanzado_ui.json`.
+* **Logging Detallado**: Registra las operaciones, advertencias y errores en un archivo de log (`Buscador_Avanzado_App_v1.10.3_Mod.log`) para facilitar la depuración y el seguimiento.
 
-- Interfaz gráfica intuitiva basada en Tkinter
-- Carga y visualización de archivos Excel (.xlsx, .xls)
-- Búsqueda avanzada con múltiples operadores:
-  - Operadores lógicos: AND (`+`), OR (`|` o `/`)
-  - Comparaciones numéricas: `>`, `<`, `>=`, `<=`, `=`
-  - Rangos numéricos: `num1 - num2`
-  - Negación (exclusión): `#palabra` o `#"frase completa"`
-- Normalización de texto para búsquedas insensibles a mayúsculas/minúsculas y acentos
-- Exportación de resultados a Excel o CSV
-- Guardado de reglas/búsquedas para uso posterior
-- Configuración persistente entre sesiones
+## Estructura del Proyecto
 
-## 🔧 Requisitos
-
-- Python 3.6 o superior
-- Dependencias:
-  - pandas
-  - openpyxl (para archivos .xlsx)
-  - tkinter (incluido en la mayoría de instalaciones de Python)
-
-## 📦 Instalación
-
-1. Asegúrese de tener Python 3.6+ instalado
-2. Instale las dependencias:
-
-```bash
-pip install pandas openpyxl
-```
-
-3. Clone o descargue este repositorio
-4. Ejecute el script:
-
-```bash
-python Buscador_v0_7_5.py
-```
-
-## 🚀 Uso
-
-### Carga de archivos
-
-1. Inicie la aplicación
-2. Haga clic en "Cargar Diccionario" para seleccionar el archivo Excel de diccionario
-3. Haga clic en "Cargar Descripciones" para seleccionar el archivo Excel de descripciones
-
-### Sintaxis de búsqueda
-
-- **Texto simple**: Busca la palabra o frase. Ejemplo: `router cisco`
-- **Operadores lógicos**:
-  - `término1 + término2`: Busca filas con AMBOS términos (AND). Ejemplo: `tarjeta + 16 puertos`
-  - `término1 | término2`: Busca filas con AL MENOS UNO de los términos (OR). Ejemplo: `modulo | SFP`
-- **Comparaciones numéricas** (unidad opcional):
-  - `> num[UNIDAD]`: Mayor que. Ejemplo: `> 1000` o `> 1000W`
-  - `< num[UNIDAD]`: Menor que. Ejemplo: `< 50` o `< 50V`
-  - `>= num[UNIDAD]` o `≥ num[UNIDAD]`: Mayor o igual que. Ejemplo: `>= 48A`
-  - `<= num[UNIDAD]` o `≤ num[UNIDAD]`: Menor o igual que. Ejemplo: `<= 10.5W`
-  - `= num[UNIDAD]`: Igual a. Ejemplo: `= 24V`
-- **Rangos numéricos** (unidad opcional, ambos extremos incluidos):
-  - `num1 - num2[UNIDAD]`: Entre num1 y num2. Ejemplo: `10 - 20` o `50 - 100V`
-- **Negación** (excluir):
-  - `#palabra`: Excluye filas que contengan `palabra`. Ejemplo: `switch + #gestionable`
-  - `#"frase completa"`: Excluye filas con la frase. Ejemplo: `fuente + #"bajo rendimiento"`
-
-### Modos de búsqueda
-
-1. **Vía Diccionario**: La búsqueda se aplica primero al Diccionario. Si hay coincidencias (FCDs), se extraen términos clave que luego se buscan en las Descripciones.
-2. **Directa**: Si no hay coincidencias vía Diccionario, se puede buscar directamente en las Descripciones.
-3. **Búsqueda vacía**: Muestra todas las descripciones.
-
-### Exportación de resultados
-
-1. Realice una búsqueda
-2. Haga clic en "Exportar" para guardar los resultados en formato Excel (.xlsx) o CSV
-
-## 🔍 Flujo de trabajo
-
-1. **Carga de archivos**: Diccionario y Descripciones
-2. **Formulación de consulta**: Utilice la sintaxis de búsqueda para crear su consulta
-3. **Ejecución de búsqueda**: Haga clic en "Buscar" o presione Enter
-4. **Visualización de resultados**: Los resultados se muestran en la tabla inferior
-5. **Exportación** (opcional): Guarde los resultados en un archivo
-
-## 🧩 Estructura del código
-
-- `MotorBusqueda`: Clase principal que maneja la lógica de búsqueda
-- `ExtractorMagnitud`: Clase para normalizar y extraer unidades de medida
-- `ManejadorExcel`: Clase estática para cargar archivos Excel
-- `InterfazGrafica`: Clase que implementa la interfaz de usuario con Tkinter
-- `OrigenResultados`: Enumeración para rastrear el origen de los resultados
-
-## 📝 Registro y depuración
-
-La aplicación genera un archivo de registro `buscador_app_refactorizado.log` que puede ser útil para depuración.
-
-## 🔄 Configuración persistente
-
-La aplicación guarda la configuración en un archivo JSON (`config_buscador_v0_7_4_mapeo_refactor.json`) que incluye:
-- Rutas de los últimos archivos cargados
-- Índices de columnas para búsqueda en el diccionario
-
-## 👨‍💻 Desarrollo
-
-### Extensión de funcionalidades
-
-Para añadir nuevas funcionalidades:
-1. Extienda las clases existentes o cree nuevas según sea necesario
-2. Actualice la interfaz gráfica para exponer las nuevas funcionalidades
-3. Mantenga la coherencia con el flujo de trabajo existente
-
-### Mejoras potenciales
-
-- Soporte para más formatos de archivo
-- Búsqueda en múltiples archivos
-- Guardado y carga de consultas complejas
-- Visualización de datos con gráficos
-- Filtros adicionales para resultados
-
-## 📄 Licencia
-
-[Incluir información de licencia aquí]
-
-## 👥 Contribuciones
-
-[Incluir información sobre cómo contribuir al proyecto]
-
-## 📞 Contacto
-
-[Incluir información de contacto]
+El proyecto está organizado en un paquete principal `buscador_app` y un script de entrada `main.py`.
