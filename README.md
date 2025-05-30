@@ -39,6 +39,11 @@ El motor de búsqueda soporta una sintaxis rica que incluye operadores lógicos 
 
 El proyecto está organizado en un paquete principal `buscador_app` y un script de entrada `main.py`.
 
+# Buscador Modulado
+
+## Estructura del proyecto
+
+```bash
 Buscador_Modulado/
 ├── main.py                     # Punto de entrada principal de la aplicación.
 ├── README.md                   # Este archivo de documentación.
@@ -47,18 +52,18 @@ Buscador_Modulado/
 ├── Buscador_Avanzado_App_v1.10.3_Mod.log # (Generado por la app) Archivo de logs.
 │
 └── buscador_app/               # Paquete principal de la aplicación.
-├── init.py             # Hace de 'buscador_app' un paquete Python.
-├── enums.py                # Define enumeraciones (ej. OrigenResultados).
-├── utils.py                # Módulo para clases y funciones de utilidad.
-│
-├── core/                   # Subpaquete para la lógica central (motor de búsqueda).
-│   ├── init.py         # Hace de 'core' un subpaquete.
-│   └── motor_busqueda.py   # Contiene la clase MotorBusqueda.
-│
-└── gui/                    # Subpaquete para la interfaz gráfica de usuario.
-├── init.py         # Hace de 'gui' un subpaquete.
-└── interfaz_grafica.py # Contiene la clase InterfazGrafica.
-
+    ├── __init__.py             # Hace de 'buscador_app' un paquete Python.
+    ├── enums.py                # Define enumeraciones (ej. OrigenResultados).
+    ├── utils.py                # Módulo para clases y funciones de utilidad.
+    │
+    ├── core/                   # Subpaquete para la lógica central (motor de búsqueda).
+    │   ├── __init__.py         # Hace de 'core' un subpaquete.
+    │   └── motor_busqueda.py   # Contiene la clase MotorBusqueda.
+    │
+    └── gui/                    # Subpaquete para la interfaz gráfica de usuario.
+        ├── __init__.py         # Hace de 'gui' un subpaquete.
+        └── interfaz_grafica.py # Contiene la clase InterfazGrafica.
+```
 
 ### Descripción de Carpetas y Archivos:
 
