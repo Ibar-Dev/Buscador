@@ -1,0 +1,13 @@
+# Dependencias principales para la manipulación de datos y archivos Excel.
+# Se recomienda especificar versiones para asegurar la reproducibilidad del entorno.
+# Ejemplo: pandas==1.5.3 (versión exacta) o pandas>=1.0.0,<2.0.0 (rango compatible)
+pandas>=1.0.0,<2.0.0        # Para manipulación y análisis de datos [DocTecnologías]
+numpy>=1.18.0,<2.0.0        # Para operaciones numéricas [DocTecnologías]
+openpyxl>=3.0.0,<4.0.0      # Para leer y escribir archivos Excel .xlsx [DocTecnologías]
+xlrd>=1.2.0,<2.0.0          # Para leer archivos Excel .xls antiguos (si aún se necesitan)
+
+# Nota: tkinter es utilizado por la GUI y para mostrar mensajes de error.
+# Generalmente, tkinter es parte de la biblioteca estándar de Python y no
+# se incluye en requirements.txt, pero es una dependencia del sistema
+# que podría necesitar ser instalada por separado en algunas
+# instalaciones mínimas de Python (e.g., en ciertos entornos Linux).
